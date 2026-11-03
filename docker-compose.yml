@@ -1,0 +1,60 @@
+# Local streaming platform for the shop pipeline.
+#
+#   docker compose up -d      start everything
+#   docker compose down -v    stop and wipe all data (topics, offsets)
+#
+# Redpanda speaks the Kafka protocol, so every client and concept here
+# (topics, partitions, consumer groups, offsets) is the same as Apache Kafka.
+
+name: kafka-learning
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v25.3.16
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      # A broker can expose several "listeners". We use two:
+      #   internal -> redpanda:9092   for other containers (e.g. Console)
+      #   external -> localhost:19092 for your scripts running on the host
+      # The "advertise" address is what the broker tells clients to connect
+      # back to, which is why it differs per listener.
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      # Dev-friendly settings: single core, small memory, relaxed fsync.
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=info
+    ports:
+      - "19092:19092" # Kafka API (use this from your code)
+      - "18081:18081" # Schema Registry (used in later stages)
+      - "9644:9644"   # Admin API
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  console:
+    # Web UI for browsing topics, messages, consumer groups and lag.
+    # Open http://localhost:8080 once it's up.
+    image: docker.redpanda.com/redpandadata/console:v3.13.0
+    container_name: redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      REDPANDA_ADMINAPI_ENABLED: "true"
+      REDPANDA_ADMINAPI_URLS: http://redpanda:9644
+    ports:
+      - "8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+volumes:
+  redpanda-data:
