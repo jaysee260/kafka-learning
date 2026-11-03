@@ -223,24 +223,32 @@ config keys you already know (`bootstrap.servers`, `group.id`,
 `enable.auto.offset.store`, ...) carry over exactly. Its `StreamConsumer`
 fits naturally with [Tokio](https://tokio.rs) async code.
 
+### What's built
+
+Rust versions of every service are in [`services/rust/shop`](services/rust/shop),
+with a walkthrough in [`services/rust/README.md`](services/rust/README.md):
+`OrderPlaced` and `Item` structs with `#[derive(Deserialize)]`, a
+`StreamConsumer` with the same at-least-once settings as `consumer.py`, the
+same output as the Python services, and clean shutdown on Ctrl+C with
+`tokio::signal::ctrl_c()`.
+
 ### Tasks
 
-1. Create a crate at `services/rust/inventory` with `rdkafka`, `tokio`,
-   `serde` and `serde_json`.
-2. Define `OrderPlaced` and `Item` structs with `#[derive(Deserialize)]`
-   matching the JSON in [`events.py`](services/python/shop/events.py).
-3. Build a `StreamConsumer` with the same settings as `consumer.py`
-   (at-least-once: disable auto offset store, store after handling) and
-   reproduce inventory's output.
-4. Run it alongside the Python services. First give it group id
-   `inventory`, and watch the Python and Rust instances split the
-   partitions between them (one group, two languages). Then give it
-   `inventory-rust` and watch both independently process every order.
-5. Handle a malformed message (stage 4) the Rust way: deserialization
-   returns a `Result`, so route the `Err` case to `orders.dlq`.
-6. Shut down cleanly on Ctrl+C with `tokio::signal::ctrl_c()` so the
-   consumer leaves the group immediately instead of waiting for the session
-   timeout.
+1. Build it and read the code in the order the Rust README suggests.
+   Compare each file with the Python file it mirrors.
+2. Run the Rust inventory service alongside the Python one. First with the
+   default group id `inventory`, and watch the Python and Rust instances
+   split the partitions between them (one group, two languages). Then with
+   `GROUP_ID=inventory-rust`, and watch both independently process every
+   order.
+3. Feed Python consumers from the Rust producer, and Rust consumers from the
+   Python producer.
+4. Handle a malformed message the Rust way: deserialization returns a
+   `Result`, so in `consumer.rs` route the `Err` case to `orders.dlq`
+   instead of stopping. Test it with `cargo run --bin send_bad_message`.
+5. Do the stage 3 key exercise in `bin/producer.rs`.
+6. Write a new Rust-only service, for example a fraud checker that flags
+   orders over $200, using `run_consumer` and a new group id.
 
 ### Check your understanding
 
