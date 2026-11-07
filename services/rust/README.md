@@ -13,3 +13,15 @@ The suggested stack is [`rdkafka`](https://docs.rs/rdkafka) (Rust bindings
 for librdkafka, the same C library under Python's `confluent-kafka`) with
 [Tokio](https://tokio.rs) and `serde_json`. See stage 7 in
 [EXERCISES.md](../../EXERCISES.md).
+
+## Start here: `minimal-consumer/`
+
+The smallest possible service that processes messages: one `main.rs` that
+connects, subscribes to `orders`, loops, prints each message, and commits its
+offset by hand so you can see exactly when a message counts as "processed".
+Read it top to bottom, then run it:
+
+```sh
+cd services/rust/minimal-consumer
+cargo run
+```
