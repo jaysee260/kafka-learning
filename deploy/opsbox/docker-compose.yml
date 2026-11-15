@@ -1,0 +1,99 @@
+# Always-on Redpanda + Console for a homelab box, reachable from the LAN.
+#
+# This is a separate deployment from the repo-root docker-compose.yml, which
+# stays the laptop-only setup (everything on localhost). Differences here:
+#   - the broker advertises this machine's LAN address, so other machines
+#     on the network can connect
+#   - containers restart on their own after a crash or a reboot
+#   - memory is capped so the broker can't crowd out the rest of the box
+#
+#   cp .env.example .env          then set REDPANDA_ADVERTISED_HOST
+#   docker compose up -d          start (or apply changes)
+#   docker compose ps             redpanda should show "healthy"
+#   docker compose down           stop, keep the data
+#
+# See README.md in this folder for how to connect from another machine.
+
+name: event-hub
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v25.3.16
+    container_name: redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      # LISTENERS, the part that makes LAN access work.
+      #
+      # --kafka-addr is where the broker *listens* (a socket inside the
+      # container). --advertise-kafka-addr is the address the broker *hands
+      # out to clients*. A Kafka client connects in two steps:
+      #
+      #   1. It opens a connection to the bootstrap address you gave it and
+      #      asks "which brokers exist, and who leads each partition?"
+      #   2. The broker answers with its ADVERTISED address, and the client
+      #      drops the bootstrap connection and reconnects to that address
+      #      for all real work.
+      #
+      # So the advertised address has to be one the client can reach from
+      # where the client is running. "localhost" only works for a client on
+      # the same machine: from a laptop, step 1 would succeed and step 2
+      # would send the laptop to its own localhost, where nothing listens.
+      #
+      # That's why there are two listeners, each advertising a different
+      # address for a different audience:
+      #   internal -> redpanda:9092             other containers (Console)
+      #   external -> <this host's LAN address>:19092   everything else
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://${REDPANDA_ADVERTISED_HOST:?copy .env.example to .env and set REDPANDA_ADVERTISED_HOST}:19092
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      # Dev-container mode: relaxed fsync and no CPU pinning. Fine for
+      # learning and low-stakes home events; a hard power loss can drop the
+      # last few seconds of writes. Revisit before anything depends on it.
+      - --mode dev-container
+      - --smp 1
+      # Without --memory the broker sizes itself to the whole machine.
+      - --memory 1G
+      - --reserve-memory 0M
+      - --default-log-level=info
+    # Backstop above the broker's own 1G budget (it needs a little extra
+    # outside that for rpk and startup).
+    mem_limit: 1536m
+    ports:
+      # The 0.0.0.0 prefix publishes on IPv4 only. Without it Docker also
+      # binds IPv6, and a box with a public IPv6 address would be offering
+      # an unauthenticated broker to whatever the router lets through.
+      - "0.0.0.0:19092:19092" # Kafka API (use this from your code)
+      - "0.0.0.0:18081:18081" # Schema Registry (used in later stages)
+      - "0.0.0.0:9644:9644"   # Admin API
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  console:
+    # Web UI: http://<this host's LAN address>:8080
+    # It talks to the broker over the internal listener, so it never needs
+    # the LAN address.
+    image: docker.redpanda.com/redpandadata/console:v3.13.0
+    container_name: redpanda-console
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      REDPANDA_ADMINAPI_ENABLED: "true"
+      REDPANDA_ADMINAPI_URLS: http://redpanda:9644
+    mem_limit: 512m
+    ports:
+      - "0.0.0.0:8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+volumes:
+  redpanda-data:
