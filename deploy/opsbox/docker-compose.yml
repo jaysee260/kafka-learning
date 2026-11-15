@@ -271,6 +271,34 @@ services:
       ntfy:
         condition: service_healthy
 
+  ring-alerts:
+    # The first consumer of the home.ring.* topics: sends a phone alert
+    # through ntfy when a door or window opens or closes, or a camera sees
+    # motion. The code, with the reasoning, is
+    # services/python/home/ring_alerts.py.
+    #
+    # After changing that file:  docker compose up -d --build ring-alerts
+    build: ../../services/python
+    image: event-hub/python-services
+    container_name: ring-alerts
+    restart: unless-stopped
+    command: ["python", "-m", "home.ring_alerts"]
+    environment:
+      # Container to container, so the internal listener and ntfy's own
+      # port, not the LAN address.
+      BOOTSTRAP_SERVERS: redpanda:9092
+      NTFY_URL: http://ntfy:80
+      NTFY_TOPIC: home-alerts
+      NTFY_USER: hub-publisher
+      NTFY_PASSWORD: ${NTFY_PUBLISHER_PASSWORD:?set NTFY_PUBLISHER_PASSWORD in .env}
+    mem_limit: 128m
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      ntfy:
+        condition: service_healthy
+    logging: *logging
+
 volumes:
   redpanda-data:
   mosquitto-data:

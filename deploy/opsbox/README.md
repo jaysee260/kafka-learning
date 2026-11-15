@@ -301,15 +301,15 @@ To add a topic, add it to `create-topics.sh` and run
 ## Phone alerts: ntfy
 
 [ntfy](https://ntfy.sh) is a small server that turns an HTTP POST into a
-push notification. It is the last hop of a pipeline that doesn't exist yet:
+push notification. It is the last hop of this pipeline:
 
 ```
-home.ring.contact / home.ring.ding  ->  a consumer you write  ->  ntfy  ->  your phone
+home.ring.contact / home.ring.motion  ->  ring-alerts  ->  ntfy  ->  your phone
 ```
 
-The consumer reads events from Redpanda, decides which ones deserve an
-alert, and posts a line of text to ntfy. Nothing publishes to ntfy yet
-except the test script below.
+`ring-alerts` is a consumer: it reads events from Redpanda, decides which
+ones deserve an alert, and posts a line of text to ntfy. It is described
+under [The alert consumer](#the-alert-consumer) below.
 
 - Address: `http://192.168.1.246:2586` on the LAN (web page and API).
   This deployment is also published at `https://ntfy.humblehome.net`; see
@@ -396,6 +396,45 @@ Three things make it work:
 Being public changes who can knock on the door, not who gets in: every
 topic still needs a login, and there is no sign-up.
 
+### The alert consumer
+
+`ring-alerts` is the first consumer of the `home.ring.*` topics, and the
+whole of it is one file: `services/python/home/ring_alerts.py`. It sends
+an alert when
+
+- a contact sensor (door or window) opens or closes: "Back Door: Opened"
+- a camera sees motion: "Backyard: Motion detected"
+
+and stays quiet about everything else: baseline records (`initial: true`),
+motion ending, and the alarm's own motion detector.
+
+It is worth reading for three things the earlier stages didn't need:
+
+- **Starting at the end.** The shop consumers use
+  `auto.offset.reset=earliest` so a new group reads the whole topic. This
+  one uses `latest`: the first time it runs it starts with whatever happens
+  next, because yesterday's door openings are not news. After that first
+  run the group's committed offsets decide where it resumes.
+- **A lookup table from a compacted topic.** Events carry a device id, and
+  the names live in `home.ring.devices`. The service reads that topic from
+  the beginning into a dictionary when it starts and keeps it current
+  while it runs. That is a stream-table join done by hand.
+- **Giving up on purpose.** If ntfy is down, the service retries, but only
+  for three minutes (`MAX_AGE_SECONDS`). After that the alert is dropped
+  with a line in the log. The same rule applies after the service itself
+  was down: it resumes where it left off and skips anything too old. A
+  stale "door opened" an hour late is worse than none.
+
+```bash
+docker logs -f ring-alerts                       # one line per alert sent or dropped
+docker exec redpanda rpk group describe ring-alerts   # its offsets and lag
+docker compose up -d --build ring-alerts         # after changing the code
+```
+
+To change what you get alerted about, edit `alert_for()` in that file. Its
+tests need no broker: `python -m unittest home.test_ring_alerts` from
+`services/python`.
+
 ### Send a notification
 
 ```bash
@@ -450,8 +489,9 @@ rest.
   [production settings](https://docs.redpanda.com/current/deploy/redpanda/manual/production/).
 - **Memory.** The broker is told to use 1 GB (`--memory 1G`) with a 1.5 GB
   container limit; Console and ring-mqtt are limited to 512 MB each, the
-  bridge to 256 MB, and Mosquitto and ntfy to 128 MB each. In practice the
-  Ring services use about 120 MB between them and ntfy about 20 MB.
+  bridge to 256 MB, and Mosquitto, ntfy and ring-alerts to 128 MB each. In
+  practice the Ring services use about 120 MB between them, and ntfy and
+  ring-alerts about 20 MB each.
 - **Disk.** Topics keep data for 7 days by default with no size cap. That
   is tiny for this project's traffic. Set `retention.bytes` on a topic
   before pointing anything high-volume at it.
