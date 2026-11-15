@@ -200,7 +200,68 @@ services:
         condition: service_completed_successfully
     logging: *logging
 
+  ntfy:
+    # https://ntfy.sh, self-hosted: turns an HTTP POST into a push
+    # notification on a phone. Nothing in the hub publishes to it yet; it is
+    # here for a consumer that reads home.ring.* topics and posts an alert
+    # when a door opens or the doorbell rings.
+    #
+    # Web page and API: http://<this host's address>:2586
+    # Accounts and permissions: ntfy/create-users.sh
+    image: binwiederhier/ntfy:v2.37.2
+    container_name: ntfy
+    restart: unless-stopped
+    command: ["serve"]
+    environment:
+      # Messages are kept on disk this long, so a phone that was out of
+      # reach catches up when it reconnects. The default is 12h.
+      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+      NTFY_CACHE_DURATION: 72h
+      # Accounts live in this file. With deny-all, a topic is closed to
+      # everyone, signed in or not, unless create-users.sh grants access.
+      NTFY_AUTH_FILE: /var/lib/ntfy/user.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      # The web page asks for a login instead of showing an empty app.
+      NTFY_ENABLE_LOGIN: "true"
+      NTFY_REQUIRE_LOGIN: "true"
+    mem_limit: 128m
+    ports:
+      - "0.0.0.0:2586:80" # HTTP, login required
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+      - ntfy-auth:/var/lib/ntfy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O - http://127.0.0.1:80/v1/health | grep -q '\"healthy\":true'"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+    logging: *logging
+
+  ntfy-users:
+    # One-shot: creates the ntfy accounts from .env, then exits. It works
+    # on the same account file as the server through the shared volume.
+    image: binwiederhier/ntfy:v2.37.2
+    container_name: ntfy-users
+    restart: "no"
+    entrypoint: ["/bin/sh", "/hub/create-users.sh"]
+    environment:
+      NTFY_AUTH_FILE: /var/lib/ntfy/user.db
+      # Only so the permission list this prints matches the server's.
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_PUBLISHER_PASSWORD: ${NTFY_PUBLISHER_PASSWORD:?set NTFY_PUBLISHER_PASSWORD in .env}
+      NTFY_PHONE_PASSWORD: ${NTFY_PHONE_PASSWORD:?set NTFY_PHONE_PASSWORD in .env}
+    volumes:
+      - ./ntfy:/hub:ro
+      - ntfy-auth:/var/lib/ntfy
+    depends_on:
+      ntfy:
+        condition: service_healthy
+
 volumes:
   redpanda-data:
   mosquitto-data:
   ring-mqtt-data:
+  ntfy-cache:
+  ntfy-auth:
