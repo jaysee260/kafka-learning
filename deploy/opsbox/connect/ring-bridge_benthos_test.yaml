@@ -127,3 +127,100 @@ tests:
           mqtt_topic: ring/loc-1/camera/dev-front-door/motion/state
     output_batches:
       - - bloblang: '@kafka_topic == "home.ring.motion.dlq" && @bridge_error.contains("empty payload")'
+
+  # --- Device lookup records -------------------------------------------
+
+  - name: a device's info announcement becomes a home.ring.devices record
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: |
+          {
+            "name": "Info",
+            "unique_id": "dev-front-door_info",
+            "state_topic": "ring/loc-1/camera/dev-front-door/info/state",
+            "device": { "ids": ["dev-front-door"], "name": "Front Door", "mf": "Ring", "mdl": "Doorbell" }
+          }
+        metadata:
+          mqtt_topic: homeassistant/sensor/loc-1/dev-front-door_info/config
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.devices" && @device_id == "dev-front-door" && !this.exists("event_id")'
+          json_contains:
+            device_id: dev-front-door
+            source: ring
+            name: Front Door
+            model: Doorbell
+            manufacturer: Ring
+            location_id: loc-1
+            category: camera
+
+  - name: announcements for a device's other sensors are ignored
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: '{"name": "Battery", "device": {"ids": ["dev-front-door"], "name": "Front Door"}}'
+        metadata:
+          mqtt_topic: homeassistant/sensor/loc-1/dev-front-door_battery/config
+    output_batches: []
+
+  - name: a device announcement without a name goes to the devices DLQ
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: '{"name": "Info", "state_topic": "ring/loc-1/camera/dev-x/info/state"}'
+        metadata:
+          mqtt_topic: homeassistant/sensor/loc-1/dev-x_info/config
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.devices.dlq" && @device_id == "dev-x" && !@.exists("fingerprint")'
+
+  # --- Repeats ---------------------------------------------------------
+  # The cache lookup is replaced by a fixed answer ("mocked"), standing in
+  # for "the last thing forwarded for this MQTT topic was ...".
+
+  - name: a repeat of the last forwarded state is dropped
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    mocks:
+      lookup_last_forwarded:
+        mapping: root = "OFF"
+    input_batch:
+      - content: "OFF"
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-back-door/contact/state
+    output_batches: []
+
+  - name: a change from the last forwarded state passes
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    mocks:
+      lookup_last_forwarded:
+        mapping: root = "OFF"
+    input_batch:
+      - content: "ON"
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-back-door/contact/state
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.contact" && @fingerprint == "ON"'
+          json_contains: { state: "ON" }
+
+  - name: an unchanged battery reading is dropped, a changed one passes
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    mocks:
+      lookup_last_forwarded:
+        mapping: root = "87|ok"
+    input_batch:
+      - content: '{"batteryLevel": 87, "batteryStatus": "ok", "lastUpdate": "newer"}'
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-back-door/info/state
+      - content: '{"batteryLevel": 86, "batteryStatus": "ok"}'
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-back-door/info/state
+    output_batches:
+      - - json_contains: { battery_level: 86, battery_status: ok }

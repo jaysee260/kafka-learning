@@ -10,9 +10,11 @@ user ring-mqtt
 topic readwrite ring/#
 topic readwrite homeassistant/#
 
-# The Redpanda Connect bridge only ever reads.
+# The Redpanda Connect bridge only ever reads: device state under ring/#,
+# and the device descriptions ring-mqtt publishes under homeassistant/#.
 user bridge
 topic read ring/#
+topic read homeassistant/#
 
 # Read-only account for looking around with an MQTT client.
 user viewer

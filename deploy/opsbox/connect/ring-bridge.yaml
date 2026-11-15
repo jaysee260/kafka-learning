@@ -1,8 +1,13 @@
 # Redpanda Connect pipeline: Ring events from MQTT into Redpanda topics.
 #
 #   Mosquitto (MQTT)  --->  this bridge  --->  Redpanda (Kafka API)
+#
 #   ring/<location>/<category>/<device>/<entity>/state
-#                                          home.ring.<kind>, key = device id
+#                                 -> home.ring.<kind>     one event per change
+#   homeassistant/sensor/<location>/<device>_info/config
+#                                 -> home.ring.devices    one record per device
+#
+# Every record's key is the Ring device id.
 #
 # A Connect pipeline is three parts: an input, a list of processors that
 # each message passes through, and an output. Tests for the processors are
@@ -42,6 +47,12 @@ input:
       - ring/+/+/+/freeze/state
       - ring/+/+/+/info/state     # device info JSON, the source of battery readings
 
+      # ring-mqtt describes each device (name, model) in the format Home
+      # Assistant uses to discover devices. It sends one such message per
+      # sensor; the "info" sensor exists on every device, so that one is
+      # used as the device's description and the rest are ignored.
+      - homeassistant/sensor/+/+/config
+
 pipeline:
   # One message at a time, start to finish. Kafka keeps the order of
   # messages within a partition, but only the order they were PRODUCED in,
@@ -58,6 +69,9 @@ pipeline:
         # sent to the right dead-letter topic.
         - mapping: |
             let parts = @mqtt_topic.split("/")
+            let is_device = $parts.index(0) == "homeassistant"
+
+            # Entity -> kind, for messages under ring/.
             let kinds = {
               "motion":  "motion",
               "ding":    "ding",
@@ -74,27 +88,33 @@ pipeline:
               "freeze":  "alarm",
               "info":    "battery"
             }
-            let kind = $kinds.get($parts.index(4)).or("")
+            let kind = if $is_device {
+              if $parts.index(3).has_suffix("_info") { "devices" } else { "" }
+            } else {
+              $kinds.get($parts.index(4)).or("")
+            }
             root = if $kind == "" { deleted() }
 
-            meta location_id = $parts.index(1)
-            meta category    = $parts.index(2)
-            meta device_id   = $parts.index(3)
-            meta entity      = $parts.index(4)
             meta kind        = $kind
             meta kafka_topic = "home.ring." + $kind
+            meta location_id = if $is_device { $parts.index(2) } else { $parts.index(1) }
+            meta device_id   = if $is_device { $parts.index(3).trim_suffix("_info") } else { $parts.index(3) }
+            meta category    = if !$is_device { $parts.index(2) }
+            meta entity      = if !$is_device { $parts.index(4) }
 
-        # Step 2: wrap the payload in a common envelope. ring-mqtt sends
-        # bare text ("ON", "armed_home"), which means nothing once it is
-        # separated from its MQTT topic, so the envelope carries the
-        # context along with it.
+        # Step 2: build the record. ring-mqtt sends bare text ("ON",
+        # "armed_home"), which means nothing once it is separated from its
+        # MQTT topic, so events get a common envelope that carries the
+        # context along.
+        #
+        # This step also computes a "fingerprint": the part of the message
+        # that has to change for it to count as news. Step 3 uses it.
         - mapping: |
             let raw = content().string()
 
-            # info/state is JSON describing the whole device. Only battery
-            # readings are kept. Payloads that are not valid JSON fail here
-            # and go to the DLQ.
-            let info = if @kind == "battery" { $raw.parse_json() }
+            # Battery and device messages are JSON. Payloads that are not
+            # valid JSON fail here and go to the DLQ.
+            let doc = if @kind == "battery" || @kind == "devices" { $raw.parse_json() }
 
             let event = {
               "event_id":    uuid_v4(),
@@ -108,15 +128,63 @@ pipeline:
             }
 
             root = match {
+              @kind == "devices" => {
+                "device_id":    @device_id,
+                "source":       "ring",
+                "name":         $doc.device.name.not_null(),
+                "model":        $doc.device.mdl,
+                "manufacturer": $doc.device.mf,
+                "location_id":  @location_id,
+                # The device's own MQTT topic says whether it is a camera
+                # or an alarm device: ring/<location>/<category>/...
+                "category":     $doc.state_topic.split("/").index(2),
+                "updated_at":   now()
+              }
               # Mains-powered devices report info with no battery fields.
-              @kind == "battery" && $info.batteryLevel == null && $info.batteryStatus == null => deleted()
+              @kind == "battery" && $doc.batteryLevel == null && $doc.batteryStatus == null => deleted()
               @kind == "battery" => $event.merge({
-                "battery_level":  $info.batteryLevel,
-                "battery_status": $info.batteryStatus
+                "battery_level":  $doc.batteryLevel,
+                "battery_status": $doc.batteryStatus
               })
               $raw == "" => throw("empty payload")
               _ => $event.merge({ "state": $raw })
             }
+
+            meta fingerprint = match {
+              @kind == "devices" => "%v|%v".format($doc.device.name, $doc.device.mdl)
+              @kind == "battery" => "%v|%v".format($doc.batteryLevel, $doc.batteryStatus)
+              _ => $raw
+            }
+
+        # Step 3: only pass on changes.
+        #
+        # ring-mqtt publishes STATE, not events: it was built for Home
+        # Assistant, where hearing "the door is closed" six times is
+        # harmless. It resends everything several times after it starts,
+        # and resends device info every five minutes. An event log should
+        # say "the door closed" once, so the bridge remembers the last
+        # fingerprint it forwarded for each MQTT topic and drops a message
+        # that matches it.
+        #
+        # `branch` runs the lookup on a copy of the message, then
+        # result_map copies just the answer back as metadata, leaving the
+        # record built in step 2 untouched.
+        - branch:
+            request_map: root = ""
+            processors:
+              - label: lookup_last_forwarded
+                cache:
+                  resource: last_forwarded
+                  operator: get
+                  key: ${! @mqtt_topic }
+              # A key that isn't in the cache yet is reported as an error;
+              # here it just means "never seen", so turn it into empty.
+              - catch:
+                  - mapping: root = ""
+            result_map: meta last_fingerprint = content().string()
+
+        - mapping: |
+            root = if @last_fingerprint == @fingerprint { deleted() }
 
     # `catch` only runs for messages that failed above. Instead of dropping
     # them or blocking the pipeline, send the untouched original payload to
@@ -127,27 +195,54 @@ pipeline:
             # Step 1 cannot fail for the topics subscribed above; the
             # fallback only exists so a routing bug still lands somewhere.
             meta kafka_topic = @kafka_topic.or("home.ring.alarm") + ".dlq"
+            # Dead letters are never remembered as "forwarded".
+            meta fingerprint = deleted()
 
 output:
-  redpanda:
-    # The broker's internal listener: this container is on the same Docker
-    # network, so it uses the container name, not the LAN address.
-    seed_brokers: [redpanda:9092]
-    topic: ${! @kafka_topic }
+  # Two outputs, strictly in order: write to Redpanda, and only once that
+  # has succeeded, remember the fingerprint. Doing it the other way round
+  # would lose an event whenever a write failed and was retried, because
+  # the retry would look like a repeat.
+  broker:
+    pattern: fan_out_sequential
+    outputs:
+      - redpanda:
+          # The broker's internal listener: this container is on the same
+          # Docker network, so it uses the container name, not the LAN
+          # address.
+          seed_brokers: [redpanda:9092]
+          topic: ${! @kafka_topic }
 
-    # All of one device's events share a key, so they land in one partition
-    # and stay in order relative to each other.
-    key: ${! @device_id }
+          # All of one device's records share a key, so they land in one
+          # partition and stay in order relative to each other.
+          key: ${! @device_id }
 
-    # Copied onto each record as Kafka headers.
-    metadata:
-      include_patterns: ["^mqtt_topic$", "^bridge_error$"]
+          # Copied onto each record as Kafka headers.
+          metadata:
+            include_patterns: ["^mqtt_topic$", "^bridge_error$"]
 
-    # Topics are created on purpose by create-topics.sh. A typo here should
-    # fail loudly, not quietly make a new one-partition topic.
-    allow_auto_topic_creation: false
-    max_in_flight: 1
+          # Topics are created on purpose by create-topics.sh. A typo here
+          # should fail loudly, not quietly make a new one-partition topic.
+          allow_auto_topic_creation: false
+          max_in_flight: 1
 
-logger:
-  level: INFO
-  format: logfmt
+      - switch:
+          cases:
+            - check: '@fingerprint != null'
+              output:
+                cache:
+                  target: last_forwarded
+                  key: ${! @mqtt_topic }
+                  max_in_flight: 1
+                processors:
+                  - mapping: root = @fingerprint
+            - output:
+                drop: {}
+
+cache_resources:
+  # Held in memory, so it starts empty when the bridge restarts. The
+  # visible effect: after a bridge restart, each device's current state
+  # comes through once more as it is next published.
+  - label: last_forwarded
+    lru:
+      cap: 10000

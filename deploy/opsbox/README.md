@@ -155,6 +155,7 @@ stay in order.
 | `home.ring.ding` | 1 | doorbell pressed | `.../ding/state` |
 | `home.ring.alarm` | 1 | alarm mode, siren, smoke, CO, flood, freeze | `.../alarm/state` and similar |
 | `home.ring.battery` | 1 | battery level and status | `.../info/state` |
+| `home.ring.devices` | 1, compacted | one record per device: name, model, category | `homeassistant/sensor/.../<device>_info/config` |
 
 Each one has a `.dlq` partner with one partition (`home.ring.motion.dlq`
 and so on). When the bridge can't turn an MQTT message into an event, it
@@ -182,6 +183,59 @@ Battery events have `battery_level` and `battery_status` instead of
 `state`. The MQTT topic the event came from is on the record as a
 `mqtt_topic` header.
 
+### State in, events out
+
+ring-mqtt was built for Home Assistant, so it publishes *state*, and
+repeats it freely: everything is resent six times in the three minutes
+after it starts, and device info every five minutes after that. Hearing
+"the door is closed" again is harmless to a dashboard, but it is noise in
+an event log.
+
+So the bridge only forwards changes. It remembers the last value it
+forwarded for each MQTT topic and drops a message that matches it. Two
+consequences worth knowing:
+
+- The first record for each device after the bridge starts is its
+  *current state*, not something that just happened. The bridge's memory
+  is in RAM, so this one-time snapshot repeats after every bridge restart.
+- Motion and dings come as pairs: `ON` when it starts, `OFF` when Ring
+  considers it over.
+
+### Device names: a lookup topic
+
+Events carry a device id, not a name. Names live in `home.ring.devices`:
+
+```json
+{
+  "device_id": "5c475ecce0b8",
+  "source": "ring",
+  "name": "Front Door",
+  "model": "Doorbell Gen 2",
+  "manufacturer": "Ring",
+  "category": "camera",
+  "location_id": "<ring location id>",
+  "updated_at": "2026-11-15T20:18:53.830764344Z"
+}
+```
+
+This topic is **compacted**. A normal topic is a history: records are
+kept for a while and then dropped by age. A compacted topic is a table:
+the broker keeps the latest record for each key indefinitely and discards
+only the older ones it replaced. Rename a device in the Ring app, restart
+ring-mqtt, and a new record with the same key supersedes the old one.
+
+A consumer that wants names reads `home.ring.devices` from the beginning
+into a dictionary keyed by device id, then looks each event's `device_id`
+up in it. That is a stream-table join, and it is why both sides use the
+same key.
+
+```bash
+docker exec redpanda rpk topic consume home.ring.devices -o start -f '%k  %v\n'
+```
+
+Two devices can share a name (a doorbell and a door sensor both called
+"Front Door"); `category` tells them apart.
+
 ### Watching it
 
 In Console (`http://192.168.1.246:8080`), open a `home.ring.*` topic. Or
@@ -204,7 +258,8 @@ as `viewer` with the `MQTT_VIEWER_PASSWORD` from `.env`.
 ### Changing the bridge
 
 `connect/ring-bridge.yaml` is the whole pipeline: which MQTT topics it
-subscribes to, how a topic maps to a kind, and the shape of the event.
+subscribes to, how a topic maps to a kind, the shape of the record, and
+the dropping of repeats.
 The file next to it holds unit tests that run without any broker:
 
 ```bash
@@ -224,6 +279,9 @@ To add a topic, add it to `create-topics.sh` and run
 - **A bridge restart doesn't lose events.** It connects with a fixed
   client id and a persistent session, so Mosquitto queues events for it
   while it is away (up to 1000 by default).
+- **Device records need ring-mqtt to announce them.** It does so when it
+  starts, so `docker compose restart ring-mqtt` refreshes
+  `home.ring.devices` after you add or rename a device.
 - **A ring-mqtt outage does lose events.** If ring-mqtt or the internet
   connection is down, Ring's cloud does not replay what you missed.
 
