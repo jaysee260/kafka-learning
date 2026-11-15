@@ -14,6 +14,18 @@ config key is identical), [Tokio](https://tokio.rs) for async, and
 The home event hub's Rust services are a separate package, described in
 [Home services](#home-services) at the bottom of this page.
 
+## Start here: `minimal-consumer/`
+
+The smallest possible service that processes messages: one `main.rs` that
+connects, subscribes to `orders`, loops, prints each message, and commits its
+offset by hand so you can see exactly when a message counts as "processed".
+Read it top to bottom, then run it:
+
+```sh
+cd services/rust/minimal-consumer
+cargo run
+```
+
 ## Python to Rust map
 
 Everything lives in one Cargo package, `shop/`, laid out like the Python

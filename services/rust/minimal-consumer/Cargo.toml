@@ -1,0 +1,15 @@
+# The smallest useful Kafka consumer in Rust: one file, two dependencies.
+# Run it with `cargo run` from this folder (Redpanda must be up).
+[package]
+name = "minimal-consumer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Kafka client: Rust bindings for librdkafka (the same C library under
+# Python's confluent-kafka). The first build compiles librdkafka from source,
+# so it takes a minute or two.
+rdkafka = "0.39.0"
+# Async runtime. rdkafka's StreamConsumer gives us `recv().await`, and
+# `#[tokio::main]` is what lets `main` be async.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
