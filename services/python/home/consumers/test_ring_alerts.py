@@ -1,12 +1,12 @@
 """Tests for the alert rules. No broker needed:
 
-    python -m unittest home.test_ring_alerts
+    python -m unittest home.consumers.test_ring_alerts
 """
 
 import unittest
 
 from home.kafka_io import display_name
-from home.ring_alerts import what_happened
+from home.consumers.ring_alerts import what_happened
 
 
 def event(kind, state, category="alarm", initial=False):

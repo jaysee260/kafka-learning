@@ -1,10 +1,7 @@
-//! Plumbing shared by the home services in `src/bin/`.
+//! What the publishers and the consumers both need.
 
-pub mod bitcoin_core;
-pub mod ckpool;
 pub mod events;
 pub mod kafka_io;
-pub mod ntfy;
 
 /// A setting from the environment, or its default.
 pub fn setting(name: &str, default: &str) -> String {

@@ -378,23 +378,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3011d1213f159867b13cfd6ac92d2cd5f1345762c63be3554e84092d85a50bbd"
 
 [[package]]
-name = "home"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitcoin",
- "chrono",
- "rdkafka",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
- "zmq",
-]
-
-[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -703,6 +686,30 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "mining_alerts"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde_json",
+ "shared",
+ "tokio",
+]
+
+[[package]]
+name = "mining_watch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "regex",
+ "serde_json",
+ "shared",
+ "tokio",
+ "zmq",
+]
 
 [[package]]
 name = "mio"
@@ -1148,6 +1155,19 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "rdkafka",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

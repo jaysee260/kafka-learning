@@ -399,7 +399,7 @@ topic still needs a login, and there is no sign-up.
 ### The alert consumer
 
 `ring-alerts` is the first consumer of the `home.ring.*` topics. Its
-story fits in one 50-line file, `services/python/home/ring_alerts.py`:
+story fits in one 50-line file, `services/python/home/consumers/ring_alerts.py`:
 for each new event, work out what happened, look up the device's name,
 send it to the phone. The plumbing sits beside it in `kafka_io.py`
 (reading from Redpanda) and `ntfy.py` (reaching the phone). It sends an
@@ -437,7 +437,7 @@ docker compose up -d --build ring-alerts         # after changing the code
 
 To change what you get alerted about, edit `what_happened()` in
 `ring_alerts.py`. Its
-tests need no broker: `python -m unittest home.test_ring_alerts` from
+tests need no broker: `python -m unittest home.consumers.test_ring_alerts` from
 `services/python`.
 
 ### Send a notification
@@ -489,7 +489,8 @@ Two things are news, and each reaches `mining-watch` its own way:
   block is yours.
 
 `mining-alerts` reads the two topics and buzzes your phone. Both programs
-are Rust, in `services/rust/home`.
+are Rust: `services/rust/home/publishers/mining_watch` and
+`services/rust/home/consumers/mining_alerts`.
 
 | Topic | Key | One record means |
 | --- | --- | --- |
@@ -514,7 +515,7 @@ Good to know:
 - The first reading for each miner is published with `initial: true` and
   does not alert, the same convention as the Ring topics.
 - Best shares under 1M do not alert, so a miner that just joined does not
-  buzz every few minutes. Change `WORTH_A_BUZZ` in `mining_alerts.rs`.
+  buzz every few minutes. Change `WORTH_A_BUZZ` in the consumer's `main.rs`.
 - A block alert is sent at ntfy's highest priority. Mining alerts are held
   for up to a day if ntfy is down, where door alerts are dropped after
   three minutes.

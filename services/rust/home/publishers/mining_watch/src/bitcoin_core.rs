@@ -17,7 +17,7 @@ use bitcoin::{Address, Network, ScriptBuf};
 use tokio::sync::mpsc;
 
 use crate::ckpool::{pi, ssh_options};
-use crate::setting;
+use shared::setting;
 
 /// Where the tunnel comes out on this side.
 const LOCAL_END: &str = "127.0.0.1:28332";

@@ -13,8 +13,8 @@ COPY . .
 # A failing test fails the build, so a broken image is never produced.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo test --release --locked \
-    && cargo build --release --locked \
+    cargo test --release --locked --workspace \
+    && cargo build --release --locked --workspace \
     && cp target/release/mining_watch target/release/mining_alerts /usr/local/bin/
 
 # ---- Run: just the two programs, plus ssh for reading the Pi ----

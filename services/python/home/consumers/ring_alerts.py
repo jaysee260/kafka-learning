@@ -1,7 +1,7 @@
 """Sends a phone alert when a door or window opens or closes, or a camera
 sees motion.
 
-    python -m home.ring_alerts
+    python -m home.consumers.ring_alerts
 
 This file is the whole story. The plumbing is in two helpers you only need
 to open if you are curious: kafka_io.py (reading from Redpanda) and

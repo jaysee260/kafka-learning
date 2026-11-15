@@ -1,0 +1,13 @@
+[package]
+name = "mining_alerts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+shared.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+# HTTP client, for posting alerts to ntfy.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

@@ -16,11 +16,19 @@ for librdkafka, the same C library under Python's `confluent-kafka`) with
 
 ## Home services
 
-`home/` holds the Rust services of the home event hub
-(`deploy/opsbox`): `mining_watch` and `mining_alerts`. Each program in
-`home/src/bin/` is short and reads top to bottom; the plumbing it leans on
-is in `home/src/`. They are built and tested in Docker, so you don't need
-Rust installed:
+`home/` holds the Rust services of the home event hub (`deploy/opsbox`),
+split by which way the events flow:
+
+```
+home/
+  publishers/mining_watch/    puts events INTO Redpanda
+  consumers/mining_alerts/    reads events OUT of Redpanda
+  shared/                     the event types and the Redpanda plumbing both need
+```
+
+Each service's `src/main.rs` is short and reads top to bottom; the plumbing
+only that service needs sits next to it. They are built and tested in
+Docker, so you don't need Rust installed:
 
 ```bash
 cd deploy/opsbox

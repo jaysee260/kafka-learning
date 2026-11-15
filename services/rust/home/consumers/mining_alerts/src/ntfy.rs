@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
-use crate::setting;
+use shared::setting;
 
 /// What the phone shows.
 #[derive(Debug, PartialEq)]

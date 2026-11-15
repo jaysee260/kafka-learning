@@ -6,19 +6,23 @@
 //!   a block we found   Bitcoin Core announces every new block the moment it
 //!                      arrives, and we check whether its reward pays us
 //!
-//! Each one becomes an event in Redpanda. mining_alerts.rs turns those
-//! events into phone alerts.
+//! Each one becomes an event in Redpanda. The mining_alerts consumer turns
+//! those events into phone alerts.
 //!
-//! The plumbing is in ckpool.rs (reading the Pi), bitcoin_core.rs (block
-//! announcements) and kafka_io.rs (Redpanda).
+//! The plumbing is next to this file in ckpool.rs (reading the Pi) and
+//! bitcoin_core.rs (block announcements), and in shared/ for Redpanda.
 
 use std::time::Duration;
 
 use anyhow::Result;
-use home::bitcoin_core::{self, PayoutAddress};
-use home::events::Event;
-use home::kafka_io::{self, Publisher};
-use home::{ckpool, setting};
+use shared::events::Event;
+use shared::kafka_io::{self, Publisher};
+use shared::setting;
+
+mod bitcoin_core;
+mod ckpool;
+
+use bitcoin_core::PayoutAddress;
 
 const TEN_MINUTES: Duration = Duration::from_secs(10 * 60);
 

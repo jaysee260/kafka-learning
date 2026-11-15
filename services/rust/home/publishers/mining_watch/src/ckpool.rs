@@ -14,7 +14,7 @@ use regex::Regex;
 use serde_json::Value;
 use tokio::process::Command;
 
-use crate::setting;
+use shared::setting;
 
 pub struct Scoreboard {
     /// Miner name -> best share ever, plus "pool" for the best of everyone.
@@ -83,17 +83,6 @@ pub fn blocks_found(log: &str) -> Vec<SolvedBlock> {
             Some(SolvedBlock { height: found["height"].parse().ok()?, miner: miner.to_string() })
         })
         .collect()
-}
-
-/// 1728223514 -> "1.73G", the way miners write difficulty.
-pub fn short(difficulty: u64) -> String {
-    let difficulty = difficulty as f64;
-    for (unit, size) in [("T", 1e12), ("G", 1e9), ("M", 1e6), ("K", 1e3)] {
-        if difficulty >= size {
-            return format!("{:.2}{unit}", difficulty / size);
-        }
-    }
-    format!("{difficulty:.0}")
 }
 
 /// Runs one command on the Pi and returns what it printed.
@@ -175,13 +164,5 @@ mod tests {
     fn solved_blocks_come_from_the_log() {
         assert_eq!(blocks_found(LOG), vec![SolvedBlock { height: 950123, miner: "humble_nano3s".to_string() }]);
         assert_eq!(blocks_found(""), vec![]);
-    }
-
-    #[test]
-    fn difficulty_reads_the_way_miners_write_it() {
-        assert_eq!(short(1728223514), "1.73G");
-        assert_eq!(short(133656151619), "133.66G");
-        assert_eq!(short(3067493), "3.07M");
-        assert_eq!(short(512), "512");
     }
 }

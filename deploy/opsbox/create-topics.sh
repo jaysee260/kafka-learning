@@ -57,7 +57,7 @@ done
 # matters. Not meant for consumers, hence the underscore.
 create "_ring-bridge.last-forwarded" 1 "cleanup.policy=compact"
 
-# Mining (see services/rust/home/src/bin/mining_watch.rs). Both are compacted, so
+# Mining (see services/rust/home/publishers/mining_watch). Both are compacted, so
 # the latest record per key is kept forever. That makes each topic double
 # as the watcher's memory:
 #   best-share   key = miner name    -> each miner's current record

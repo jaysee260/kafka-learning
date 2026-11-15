@@ -1,17 +1,20 @@
 //! Sends a phone alert when a miner sets a new best share, or the pool
 //! finds a block.
 //!
-//! The events come from mining_watch.rs. The plumbing is in kafka_io.rs
-//! (reading from Redpanda) and ntfy.rs (reaching your phone).
+//! The events come from the mining_watch publisher. The plumbing is in
+//! ntfy.rs next to this file (reaching your phone) and in shared/ (reading
+//! from Redpanda).
 
 use std::time::Duration;
 
 use anyhow::Result;
-use home::ckpool::short;
-use home::events::Event;
-use home::kafka_io::new_events;
-use home::ntfy::{Alert, send_to_phone};
-use home::setting;
+use shared::events::Event;
+use shared::kafka_io::new_events;
+use shared::setting;
+
+mod ntfy;
+
+use ntfy::{Alert, send_to_phone};
 
 /// A miner that just joined beats its own record every few minutes at first.
 const WORTH_A_BUZZ: u64 = 1_000_000;
@@ -39,6 +42,17 @@ fn what_happened(event: &Event) -> Option<Alert> {
             urgent: true,
         }),
     }
+}
+
+/// 1728223514 -> "1.73G", the way miners write difficulty.
+fn short(difficulty: u64) -> String {
+    let difficulty = difficulty as f64;
+    for (unit, size) in [("T", 1e12), ("G", 1e9), ("M", 1e6), ("K", 1e3)] {
+        if difficulty >= size {
+            return format!("{:.2}{unit}", difficulty / size);
+        }
+    }
+    format!("{difficulty:.0}")
 }
 
 #[tokio::main]
@@ -105,6 +119,14 @@ mod tests {
 
         let event = Event::BlockFound { source: "bitcoin-core".to_string(), height: 950123, miner: None };
         assert_eq!(what_happened(&event).unwrap().message, "Block 950123 pays your address");
+    }
+
+    #[test]
+    fn difficulty_reads_the_way_miners_write_it() {
+        assert_eq!(short(1728223514), "1.73G");
+        assert_eq!(short(133656151619), "133.66G");
+        assert_eq!(short(3067493), "3.07M");
+        assert_eq!(short(512), "512");
     }
 
     #[test]
