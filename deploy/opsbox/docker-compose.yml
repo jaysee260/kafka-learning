@@ -274,7 +274,7 @@ services:
   ring-alerts:
     # The first consumer of the home.ring.* topics: sends a phone alert
     # through ntfy when a door or window opens or closes, or a camera sees
-    # motion. The code is services/python/home/ring_alerts.py and the two
+    # motion. The code is services/python/home/consumers/ring_alerts.py and the two
     # helpers next to it.
     #
     # After changing the code:  docker compose up -d --build ring-alerts
@@ -282,7 +282,7 @@ services:
     image: event-hub/python-services
     container_name: ring-alerts
     restart: unless-stopped
-    command: ["python", "-m", "home.ring_alerts"]
+    command: ["python", "-m", "home.consumers.ring_alerts"]
     environment:
       # Container to container, so the internal listener and ntfy's own
       # port, not the LAN address.
@@ -297,6 +297,73 @@ services:
         condition: service_healthy
       ntfy:
         condition: service_healthy
+    logging: *logging
+
+  mining-watch:
+    # Watches the solo mining pool on the Pi and publishes an event when a
+    # miner sets a new best share or the pool finds a block. Written in
+    # Rust: services/rust/home/publishers/mining_watch.
+    #
+    #   best shares  read from ckpool's stats files every ten minutes
+    #   blocks       heard from Bitcoin Core's block announcements (ZeroMQ)
+    #
+    # Nothing runs on the Pi for this: the container logs in over SSH to
+    # read the files, and keeps an SSH tunnel open to hear the announcements.
+    #
+    # After changing the code:  docker compose up -d --build mining-watch
+    build: ../../services/rust/home
+    image: event-hub/rust-services
+    container_name: mining-watch
+    restart: unless-stopped
+    command: ["mining_watch"]
+    # ssh refuses to run as a user that has no entry in /etc/passwd, and
+    # the key file is readable only by its owner on the host. Root inside
+    # the container is the simple way to satisfy both.
+    user: root
+    # A tiny init process, so the ssh processes are cleaned up properly
+    # when they end.
+    init: true
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      CKPOOL_SSH: ${CKPOOL_SSH:-}
+      CKPOOL_SSH_KEY: /ssh/id
+      CKPOOL_KNOWN_HOSTS: /ssh/known_hosts
+      # A block is ours when its reward pays this address.
+      POOL_ADDRESS: ${POOL_ADDRESS:-}
+    volumes:
+      - ${CKPOOL_SSH_KEY:-/dev/null}:/ssh/id:ro
+      - ${CKPOOL_KNOWN_HOSTS:-/dev/null}:/ssh/known_hosts:ro
+    mem_limit: 64m
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      hub-topics:
+        condition: service_completed_successfully
+    logging: *logging
+
+  mining-alerts:
+    # Turns the home.mining.* events into phone alerts, the same way
+    # ring-alerts does for doors. Written in Rust:
+    # services/rust/home/consumers/mining_alerts.
+    build: ../../services/rust/home
+    image: event-hub/rust-services
+    container_name: mining-alerts
+    restart: unless-stopped
+    command: ["mining_alerts"]
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      NTFY_URL: http://ntfy:80
+      NTFY_TOPIC: home-alerts
+      NTFY_USER: hub-publisher
+      NTFY_PASSWORD: ${NTFY_PUBLISHER_PASSWORD:?set NTFY_PUBLISHER_PASSWORD in .env}
+    mem_limit: 64m
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      ntfy:
+        condition: service_healthy
+      hub-topics:
+        condition: service_completed_successfully
     logging: *logging
 
 volumes:

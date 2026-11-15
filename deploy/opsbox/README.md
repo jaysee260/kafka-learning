@@ -399,7 +399,7 @@ topic still needs a login, and there is no sign-up.
 ### The alert consumer
 
 `ring-alerts` is the first consumer of the `home.ring.*` topics. Its
-story fits in one 50-line file, `services/python/home/ring_alerts.py`:
+story fits in one 50-line file, `services/python/home/consumers/ring_alerts.py`:
 for each new event, work out what happened, look up the device's name,
 send it to the phone. The plumbing sits beside it in `kafka_io.py`
 (reading from Redpanda) and `ntfy.py` (reaching the phone). It sends an
@@ -437,7 +437,7 @@ docker compose up -d --build ring-alerts         # after changing the code
 
 To change what you get alerted about, edit `what_happened()` in
 `ring_alerts.py`. Its
-tests need no broker: `python -m unittest home.test_ring_alerts` from
+tests need no broker: `python -m unittest home.consumers.test_ring_alerts` from
 `services/python`.
 
 ### Send a notification
@@ -463,6 +463,69 @@ requests.post(
 `Title`, `Priority` (`min` to `max`) and `Tags` (emoji short names) are
 optional; the [publishing docs](https://docs.ntfy.sh/publish/) list the
 rest.
+
+## Mining alerts: the Pi to Redpanda to your phone
+
+```
+ckpool's scoreboard  -- read over SSH every ten minutes --.
+                                                           v
+Bitcoin Core         -- announces every new block ----> mining-watch
+                                                           |
+                       home.mining.best-share   home.mining.block-found
+                                                           |
+                                                           v
+                                    mining-alerts --> ntfy --> phone
+```
+
+Two things are news, and each reaches `mining-watch` its own way:
+
+- **A new best share.** ckpool keeps a scoreboard: a file per payout
+  address with every miner's best share. The watcher reads it every ten
+  minutes and publishes only when a number went up.
+- **A block you found.** Bitcoin Core announces every new block over
+  ZeroMQ the moment it accepts it (`zmqpubrawblock` in `bitcoin.conf`).
+  Think of a radio broadcast: the watcher stays tuned in, and for each
+  block checks whether the reward pays `POOL_ADDRESS`. If it does, that
+  block is yours.
+
+`mining-alerts` reads the two topics and buzzes your phone. Both programs
+are Rust: `services/rust/home/publishers/mining_watch` and
+`services/rust/home/consumers/mining_alerts`.
+
+| Topic | Key | One record means |
+| --- | --- | --- |
+| `home.mining.best-share` | miner name, or `pool` | this miner set a new personal best (`pool` is the best of everyone) |
+| `home.mining.block-found` | block height | the pool found this block |
+
+Both topics are compacted, so the latest record per key is kept forever.
+That makes the topics the watcher's memory: when it starts it reads them
+back and knows what it already reported. Nothing is stored anywhere else.
+
+Good to know:
+
+- Nothing is installed on the Pi. The watcher logs in with the SSH key
+  named in `.env` (`CKPOOL_SSH`, `CKPOOL_SSH_KEY`, `CKPOOL_KNOWN_HOSTS`).
+  It reads ckpool's stats with `sudo cat`, and because bitcoind only
+  broadcasts on the Pi's own 127.0.0.1, it listens through an SSH tunnel.
+- A radio broadcast is not repeated. If the watcher or the tunnel was down
+  when your block was announced, it would have missed it. So the
+  ten-minute read also greps ckpool's log for `Solved and confirmed
+  block`, and reports any block not yet reported. Worst case the alert is
+  ten minutes late instead of lost.
+- The first reading for each miner is published with `initial: true` and
+  does not alert, the same convention as the Ring topics.
+- Best shares under 1M do not alert, so a miner that just joined does not
+  buzz every few minutes. Change `WORTH_A_BUZZ` in the consumer's `main.rs`.
+- A block alert is sent at ntfy's highest priority. Mining alerts are held
+  for up to a day if ntfy is down, where door alerts are dropped after
+  three minutes.
+
+```bash
+docker logs -f mining-watch       # every block it hears, and what it published
+docker logs -f mining-alerts      # what it sent to the phone
+docker exec redpanda rpk topic consume home.mining.best-share --offset start -n 20
+docker compose up -d --build mining-watch mining-alerts   # after a code change (runs the tests too)
+```
 
 ## Things to know
 

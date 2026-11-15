@@ -56,3 +56,11 @@ done
 # the same reason as the devices topic: only the latest value per key
 # matters. Not meant for consumers, hence the underscore.
 create "_ring-bridge.last-forwarded" 1 "cleanup.policy=compact"
+
+# Mining (see services/rust/home/publishers/mining_watch). Both are compacted, so
+# the latest record per key is kept forever. That makes each topic double
+# as the watcher's memory:
+#   best-share   key = miner name    -> each miner's current record
+#   block-found  key = block height  -> every block the pool ever solved
+create "home.mining.best-share" 1 "cleanup.policy=compact"
+create "home.mining.block-found" 1 "cleanup.policy=compact"

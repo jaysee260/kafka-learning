@@ -1,0 +1,17 @@
+[package]
+name = "mining_watch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+shared.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+# Picking "Solved and confirmed block ..." lines out of ckpool's log.
+regex = "1"
+# Bitcoin Core announces new blocks over ZeroMQ.
+zmq = "0.10"
+# Reading a raw block: its height and who its reward pays.
+bitcoin = "0.32"

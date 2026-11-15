@@ -14,4 +14,4 @@ COPY home home
 # Don't run as root.
 USER nobody
 
-CMD ["python", "-m", "home.ring_alerts"]
+CMD ["python", "-m", "home.consumers.ring_alerts"]

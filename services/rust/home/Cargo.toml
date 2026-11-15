@@ -1,0 +1,27 @@
+# The home event hub's Rust services, one small package per service:
+#
+#   publishers/   put events INTO Redpanda    (mining_watch)
+#   consumers/    read events OUT of Redpanda (mining_alerts)
+#   shared/       what both sides need: the event types and the Redpanda plumbing
+#
+# A workspace builds them together, so they share one Cargo.lock and one
+# compiled copy of every dependency.
+[workspace]
+resolver = "3"
+members = ["publishers/*", "consumers/*", "shared"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+
+# Versions of the dependencies more than one package uses, in one place.
+[workspace.dependencies]
+shared = { path = "shared" }
+# Async runtime: lets a service wait on several things at once.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time", "process", "sync"] }
+# JSON <-> Rust types.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Errors with a sentence of context, instead of one type per kind of error.
+anyhow = "1"
