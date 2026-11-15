@@ -25,8 +25,9 @@ home/
     best_share_watch/           a miner beat its own best share (from ckpool)
     block_watch/                our pool found a block (from Bitcoin Core)
   consumers/                  read events OUT of Redpanda
-    mining_alerts/              turns both into phone alerts
-  shared/                     event types, Redpanda and reaching the Pi
+    best_share_alerts/          phone alert for a new best share
+    block_alerts/               urgent phone alert for a found block
+  shared/                     event types, Redpanda, reaching the Pi, ntfy
 ```
 
 Each service's `src/main.rs` is short and reads top to bottom; the plumbing

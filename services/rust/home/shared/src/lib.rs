@@ -2,6 +2,7 @@
 
 pub mod events;
 pub mod kafka_io;
+pub mod ntfy;
 pub mod pi;
 
 /// A setting from the environment, or its default.

@@ -372,29 +372,46 @@ services:
         condition: service_completed_successfully
     logging: *logging
 
-  mining-alerts:
-    # Turns the home.mining.* events into phone alerts, the same way
-    # ring-alerts does for doors. Written in Rust:
-    # services/rust/home/consumers/mining_alerts.
+  best-share-alerts:
+    # Consumer. Reads home.mining.best-share and sends a phone alert when
+    # a miner sets a new best share.
+    # Code: services/rust/home/consumers/best_share_alerts.
     build: ../../services/rust/home
     image: event-hub/rust-services
-    container_name: mining-alerts
+    container_name: best-share-alerts
     restart: unless-stopped
-    command: ["mining_alerts"]
-    environment:
+    command: ["best_share_alerts"]
+    environment: &alerts-environment
+      # Container to container, so the internal listener and ntfy's own
+      # port, not the LAN address.
       BOOTSTRAP_SERVERS: redpanda:9092
       NTFY_URL: http://ntfy:80
       NTFY_TOPIC: home-alerts
       NTFY_USER: hub-publisher
       NTFY_PASSWORD: ${NTFY_PUBLISHER_PASSWORD:?set NTFY_PUBLISHER_PASSWORD in .env}
     mem_limit: 64m
-    depends_on:
+    depends_on: &alerts-depends-on
       redpanda:
         condition: service_healthy
       ntfy:
         condition: service_healthy
       hub-topics:
         condition: service_completed_successfully
+    logging: *logging
+
+  block-alerts:
+    # Consumer. Reads home.mining.block-found and sends an urgent phone
+    # alert when our pool finds a block.
+    # Code: services/rust/home/consumers/block_alerts.
+    build: ../../services/rust/home
+    image: event-hub/rust-services
+    container_name: block-alerts
+    restart: unless-stopped
+    command: ["block_alerts"]
+    # Same settings as best-share-alerts.
+    environment: *alerts-environment
+    mem_limit: 64m
+    depends_on: *alerts-depends-on
     logging: *logging
 
 volumes:

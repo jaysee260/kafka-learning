@@ -27,3 +27,24 @@ pub enum Event {
         miner: Option<String>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn events_read_the_same_as_they_are_written() {
+        let on_the_wire = r#"{"event_id": "x", "source": "ckpool", "kind": "best-share", "miner": "pool",
+                              "difficulty": 133656151619, "previous": null, "initial": true, "observed_at": "now"}"#;
+        let event: Event = serde_json::from_str(on_the_wire).unwrap();
+        let expected = Event::BestShare {
+            source: "ckpool".to_string(),
+            miner: "pool".to_string(),
+            difficulty: 133656151619,
+            previous: None,
+            initial: true,
+        };
+        assert_eq!(event, expected);
+        assert!(serde_json::from_str::<Event>(r#"{"kind": "contact", "state": "ON"}"#).is_err());
+    }
+}
