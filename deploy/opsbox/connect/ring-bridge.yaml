@@ -183,8 +183,17 @@ pipeline:
                   - mapping: root = ""
             result_map: meta last_fingerprint = content().string()
 
+        # Events also say whether this is the first value ever forwarded
+        # for the device ("initial": true). That first record is a
+        # baseline, "this is how things stood when the bridge first saw
+        # the device", not something that just happened, and a consumer
+        # can skip it.
         - mapping: |
-            root = if @last_fingerprint == @fingerprint { deleted() }
+            root = match {
+              @last_fingerprint == @fingerprint => deleted()
+              @kind == "devices" => this
+              _ => this.merge({ "initial": @last_fingerprint == "" })
+            }
 
     # `catch` only runs for messages that failed above. Instead of dropping
     # them or blocking the pipeline, send the untouched original payload to
@@ -240,9 +249,25 @@ output:
                 drop: {}
 
 cache_resources:
-  # Held in memory, so it starts empty when the bridge restarts. The
-  # visible effect: after a bridge restart, each device's current state
-  # comes through once more as it is next published.
+  # Where the last forwarded fingerprints are kept: in memory for speed,
+  # backed by a compacted Redpanda topic so the bridge still knows them
+  # after a restart. `multilevel` tries each cache in order when reading
+  # and writes to all of them.
+  #
+  # This is the same idea Kafka Streams uses for its state stores: keep
+  # working state in memory, log every change to a compacted topic, and
+  # rebuild the memory from that topic after a restart.
   - label: last_forwarded
+    multilevel: [last_forwarded_memory, last_forwarded_topic]
+
+  - label: last_forwarded_memory
     lru:
       cap: 10000
+
+  - label: last_forwarded_topic
+    redpanda:
+      seed_brokers: [redpanda:9092]
+      # The leading underscore marks it as internal plumbing, not a topic
+      # for consumers. Key = MQTT topic, value = fingerprint.
+      topic: _ring-bridge.last-forwarded
+      allow_auto_topic_creation: false

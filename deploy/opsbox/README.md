@@ -175,6 +175,7 @@ An event looks like this:
   "category": "camera",
   "entity": "motion",
   "state": "ON",
+  "initial": false,
   "observed_at": "2026-11-15T20:09:08.913610645Z"
 }
 ```
@@ -195,11 +196,21 @@ So the bridge only forwards changes. It remembers the last value it
 forwarded for each MQTT topic and drops a message that matches it. Two
 consequences worth knowing:
 
-- The first record for each device after the bridge starts is its
-  *current state*, not something that just happened. The bridge's memory
-  is in RAM, so this one-time snapshot repeats after every bridge restart.
+- The very first record for each device is a *baseline*: how things stood
+  when the bridge first saw the device, not something that just happened.
+  Those records carry `"initial": true`; every later one carries
+  `"initial": false`. A consumer that only cares about things happening
+  skips the initial ones.
 - Motion and dings come as pairs: `ON` when it starts, `OFF` when Ring
   considers it over.
+
+The bridge's memory has to outlive the bridge, or every restart would
+produce a fresh round of baselines and mislabel the next real change as
+one. So it is kept in memory and also logged to a compacted topic,
+`_ring-bridge.last-forwarded` (key: MQTT topic, value: last forwarded
+value). After a restart the bridge reads it back. Kafka Streams keeps its
+state the same way, and calls such a topic a changelog. The underscore
+marks it as plumbing rather than a topic for consumers.
 
 ### Device names: a lookup topic
 

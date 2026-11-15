@@ -50,3 +50,9 @@ for entry in "${TOPICS[@]}"; do
   create "$topic" "$partitions" "$config"
   create "$topic.dlq" 1
 done
+
+# The bridge's own memory: the last value it forwarded for each MQTT topic,
+# so it can tell a change from a repeat even after a restart. Compacted for
+# the same reason as the devices topic: only the latest value per key
+# matters. Not meant for consumers, hence the underscore.
+create "_ring-bridge.last-forwarded" 1 "cleanup.policy=compact"
