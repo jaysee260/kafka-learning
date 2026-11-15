@@ -2,6 +2,7 @@
 
 pub mod events;
 pub mod kafka_io;
+pub mod pi;
 
 /// A setting from the environment, or its default.
 pub fn setting(name: &str, default: &str) -> String {

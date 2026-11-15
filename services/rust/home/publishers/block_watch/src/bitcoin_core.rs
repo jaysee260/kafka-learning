@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use bitcoin::{Address, Network, ScriptBuf};
 use tokio::sync::mpsc;
 
-use crate::ckpool::{pi, ssh_options};
+use shared::pi::{login, ssh_options};
 use shared::setting;
 
 /// Where the tunnel comes out on this side.
@@ -80,7 +80,7 @@ fn keep_the_tunnel_open() {
             // pretend to be up if the tunnel itself could not be made.
             .args(["-o", "ServerAliveInterval=20", "-o", "ServerAliveCountMax=3", "-o", "ExitOnForwardFailure=yes"])
             .args(["-N", "-L", &format!("{LOCAL_END}:{far_end}")])
-            .arg(pi())
+            .arg(login())
             .status();
         println!("the tunnel to the Pi closed ({ended:?}), opening it again");
         thread::sleep(Duration::from_secs(5));

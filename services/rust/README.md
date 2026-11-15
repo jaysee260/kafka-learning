@@ -21,9 +21,12 @@ split by which way the events flow:
 
 ```
 home/
-  publishers/mining_watch/    puts events INTO Redpanda
-  consumers/mining_alerts/    reads events OUT of Redpanda
-  shared/                     the event types and the Redpanda plumbing both need
+  publishers/                 put events INTO Redpanda
+    best_share_watch/           a miner beat its own best share (from ckpool)
+    block_watch/                our pool found a block (from Bitcoin Core)
+  consumers/                  read events OUT of Redpanda
+    mining_alerts/              turns both into phone alerts
+  shared/                     event types, Redpanda and reaching the Pi
 ```
 
 Each service's `src/main.rs` is short and reads top to bottom; the plumbing
@@ -32,5 +35,5 @@ Docker, so you don't need Rust installed:
 
 ```bash
 cd deploy/opsbox
-docker compose build mining-watch     # compiles and runs the tests
+docker compose build block-watch      # compiles and runs the tests for all of them
 ```
