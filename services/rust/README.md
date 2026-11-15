@@ -1,6 +1,6 @@
 # Rust services
 
-Rust versions of every Python service in this repo. They use the same
+Rust versions of the Python shop services. They use the same
 broker, the same topics and the same JSON, so you can mix and match freely:
 the Python producer feeding Rust consumers, a Rust producer feeding Python
 consumers, or a Python and a Rust inventory service sharing one consumer
@@ -10,6 +10,9 @@ The stack is [`rdkafka`](https://docs.rs/rdkafka) (Rust bindings for
 librdkafka, the same C library under Python's `confluent-kafka`, so every
 config key is identical), [Tokio](https://tokio.rs) for async, and
 [`serde`](https://serde.rs) for JSON.
+
+The home event hub's Rust services are a separate package, described in
+[Home services](#home-services) at the bottom of this page.
 
 ## Python to Rust map
 
@@ -144,3 +147,28 @@ instead of after the 45 second session timeout.
   `consumer.rs`, where the `EXERCISE` comment marks the spot.
 - **Keys (stage 3).** The `EXERCISE` comment in `bin/producer.rs` shows where
   to key orders by customer.
+
+## Home services
+
+`home/` holds the Rust services of the home event hub (`deploy/opsbox`),
+split by which way the events flow:
+
+```
+home/
+  publishers/                 put events INTO Redpanda
+    best_share_watch/           a miner beat its own best share (from ckpool)
+    block_watch/                our pool found a block (from Bitcoin Core)
+  consumers/                  read events OUT of Redpanda
+    best_share_alerts/          phone alert for a new best share
+    block_alerts/               urgent phone alert for a found block
+  shared/                     event types, Redpanda, reaching the Pi, ntfy
+```
+
+Each service's `src/main.rs` is short and reads top to bottom; the plumbing
+only that service needs sits next to it. They are built and tested in
+Docker, so you don't need Rust installed:
+
+```bash
+cd deploy/opsbox
+docker compose build block-watch      # compiles and runs the tests for all of them
+```

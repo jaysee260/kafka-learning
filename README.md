@@ -83,6 +83,11 @@ All Python commands below are run from `services/python` with the virtualenv
 active. The broker address defaults to `localhost:19092`; override it with
 `BOOTSTRAP_SERVERS` if needed.
 
+To run the broker on an always-on machine instead and use it from other
+machines on your network, see [`deploy/opsbox`](deploy/opsbox/README.md).
+It also explains listeners and advertised addresses, which is what you have
+to get right as soon as the broker isn't on `localhost`.
+
 You can also poke at the broker from the command line with `rpk`, Redpanda's
 CLI, which is inside the container:
 
@@ -180,6 +185,8 @@ consumer group.
 ```
 docker-compose.yml        Redpanda broker + Redpanda Console
 EXERCISES.md              stages 3 to 7
+deploy/
+  opsbox/                 always-on, LAN-reachable variant of the broker
 services/
   python/
     requirements.txt

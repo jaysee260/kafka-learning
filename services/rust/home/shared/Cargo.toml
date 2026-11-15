@@ -1,0 +1,18 @@
+[package]
+name = "shared"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Kafka client: Rust bindings for librdkafka (built from source on first build).
+rdkafka = "0.39"
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+# Every event gets an id and the time it was seen.
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+# HTTP client, for posting alerts to ntfy.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
