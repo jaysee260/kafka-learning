@@ -1,0 +1,153 @@
+# Redpanda Connect pipeline: Ring events from MQTT into Redpanda topics.
+#
+#   Mosquitto (MQTT)  --->  this bridge  --->  Redpanda (Kafka API)
+#   ring/<location>/<category>/<device>/<entity>/state
+#                                          home.ring.<kind>, key = device id
+#
+# A Connect pipeline is three parts: an input, a list of processors that
+# each message passes through, and an output. Tests for the processors are
+# in ring-bridge_benthos_test.yaml next to this file.
+
+input:
+  mqtt:
+    urls: [tcp://mosquitto:1883]
+    user: bridge
+    password: ${MQTT_BRIDGE_PASSWORD}
+
+    # A fixed client id plus clean_session: false is a "persistent
+    # session". Mosquitto remembers this client's subscriptions and queues
+    # matching QoS 1 messages while the bridge is offline, so a bridge
+    # restart doesn't lose events.
+    client_id: ring-bridge
+    clean_session: false
+    qos: 1
+
+    # The subscription is the allowlist. ring-mqtt publishes much more
+    # (camera snapshots as JPEGs, volume settings, stream state); anything
+    # not listed here never reaches the bridge.
+    #   + matches exactly one topic level: location, category, device.
+    topics:
+      - ring/+/+/+/motion/state   # cameras, doorbells, alarm motion sensors
+      - ring/+/+/+/ding/state     # doorbell button
+      - ring/+/+/+/contact/state  # door and window sensors
+      - ring/+/+/+/zone/state     # tilt sensors, retrofit zones
+      - ring/+/+/+/alarm/state    # alarm panel: disarmed, armed_home, triggered...
+      - ring/+/+/+/mode/state     # location mode, for homes without an alarm
+      - ring/+/+/+/siren/state
+      - ring/+/+/+/police/state
+      - ring/+/+/+/fire/state
+      - ring/+/+/+/smoke/state
+      - ring/+/+/+/co/state
+      - ring/+/+/+/flood/state
+      - ring/+/+/+/freeze/state
+      - ring/+/+/+/info/state     # device info JSON, the source of battery readings
+
+pipeline:
+  # One message at a time, start to finish. Kafka keeps the order of
+  # messages within a partition, but only the order they were PRODUCED in,
+  # so the bridge must not shuffle a device's ON and OFF on the way
+  # through. At home volumes there is nothing to gain from parallelism.
+  threads: 1
+
+  processors:
+    # `try` runs its processors in order and skips the rest once one fails.
+    - try:
+        # Step 1: decide where the message goes, from its MQTT topic alone.
+        # This is kept separate from step 2 so that if step 2 fails, the
+        # routing decision is already made and the message can still be
+        # sent to the right dead-letter topic.
+        - mapping: |
+            let parts = @mqtt_topic.split("/")
+            let kinds = {
+              "motion":  "motion",
+              "ding":    "ding",
+              "contact": "contact",
+              "zone":    "contact",
+              "alarm":   "alarm",
+              "mode":    "alarm",
+              "siren":   "alarm",
+              "police":  "alarm",
+              "fire":    "alarm",
+              "smoke":   "alarm",
+              "co":      "alarm",
+              "flood":   "alarm",
+              "freeze":  "alarm",
+              "info":    "battery"
+            }
+            let kind = $kinds.get($parts.index(4)).or("")
+            root = if $kind == "" { deleted() }
+
+            meta location_id = $parts.index(1)
+            meta category    = $parts.index(2)
+            meta device_id   = $parts.index(3)
+            meta entity      = $parts.index(4)
+            meta kind        = $kind
+            meta kafka_topic = "home.ring." + $kind
+
+        # Step 2: wrap the payload in a common envelope. ring-mqtt sends
+        # bare text ("ON", "armed_home"), which means nothing once it is
+        # separated from its MQTT topic, so the envelope carries the
+        # context along with it.
+        - mapping: |
+            let raw = content().string()
+
+            # info/state is JSON describing the whole device. Only battery
+            # readings are kept. Payloads that are not valid JSON fail here
+            # and go to the DLQ.
+            let info = if @kind == "battery" { $raw.parse_json() }
+
+            let event = {
+              "event_id":    uuid_v4(),
+              "source":      "ring",
+              "kind":        @kind,
+              "device_id":   @device_id,
+              "location_id": @location_id,
+              "category":    @category,
+              "entity":      @entity,
+              "observed_at": now()
+            }
+
+            root = match {
+              # Mains-powered devices report info with no battery fields.
+              @kind == "battery" && $info.batteryLevel == null && $info.batteryStatus == null => deleted()
+              @kind == "battery" => $event.merge({
+                "battery_level":  $info.batteryLevel,
+                "battery_status": $info.batteryStatus
+              })
+              $raw == "" => throw("empty payload")
+              _ => $event.merge({ "state": $raw })
+            }
+
+    # `catch` only runs for messages that failed above. Instead of dropping
+    # them or blocking the pipeline, send the untouched original payload to
+    # the topic's dead-letter partner, with the reason in a header.
+    - catch:
+        - mapping: |
+            meta bridge_error = error()
+            # Step 1 cannot fail for the topics subscribed above; the
+            # fallback only exists so a routing bug still lands somewhere.
+            meta kafka_topic = @kafka_topic.or("home.ring.alarm") + ".dlq"
+
+output:
+  redpanda:
+    # The broker's internal listener: this container is on the same Docker
+    # network, so it uses the container name, not the LAN address.
+    seed_brokers: [redpanda:9092]
+    topic: ${! @kafka_topic }
+
+    # All of one device's events share a key, so they land in one partition
+    # and stay in order relative to each other.
+    key: ${! @device_id }
+
+    # Copied onto each record as Kafka headers.
+    metadata:
+      include_patterns: ["^mqtt_topic$", "^bridge_error$"]
+
+    # Topics are created on purpose by create-topics.sh. A typo here should
+    # fail loudly, not quietly make a new one-partition topic.
+    allow_auto_topic_creation: false
+    max_in_flight: 1
+
+logger:
+  level: INFO
+  format: logfmt

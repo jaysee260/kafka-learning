@@ -1,0 +1,129 @@
+# Unit tests for the processors in ring-bridge.yaml. They feed fake MQTT
+# messages through the pipeline and check what would be sent to Redpanda,
+# without needing a broker. Run them from deploy/opsbox with:
+#
+#   docker compose run --rm ring-bridge test /connect/ring-bridge.yaml
+#
+# (Connect finds this file by its name: <config>_benthos_test.yaml.)
+
+tests:
+  - name: camera motion becomes a home.ring.motion event keyed by device
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: "ON"
+        metadata:
+          mqtt_topic: ring/loc-1/camera/dev-front-door/motion/state
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.motion" && @device_id == "dev-front-door"'
+          json_contains:
+            source: ring
+            kind: motion
+            device_id: dev-front-door
+            location_id: loc-1
+            category: camera
+            entity: motion
+            state: "ON"
+
+  - name: doorbell ding goes to home.ring.ding
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: "ON"
+        metadata:
+          mqtt_topic: ring/loc-1/camera/dev-front-door/ding/state
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.ding" && this.event_id.length() == 36 && !this.exists("battery_level")'
+          json_contains:
+            kind: ding
+            state: "ON"
+
+  - name: contact and tilt sensors both go to home.ring.contact
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: "ON"
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-back-door/contact/state
+      - content: "OFF"
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-garage/zone/state
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.contact"'
+          json_contains: { kind: contact, entity: contact, state: "ON" }
+        - bloblang: '@kafka_topic == "home.ring.contact"'
+          json_contains: { kind: contact, entity: zone, state: "OFF" }
+
+  - name: alarm panel state goes to home.ring.alarm
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: armed_away
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-panel/alarm/state
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.alarm"'
+          json_contains: { kind: alarm, entity: alarm, state: armed_away }
+
+  - name: device info with a battery reading becomes a battery event
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: '{"batteryLevel": 87, "batteryStatus": "ok", "firmwareStatus": "Up to Date"}'
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-back-door/info/state
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.battery" && !this.exists("state") && !this.exists("firmwareStatus")'
+          json_contains:
+            kind: battery
+            device_id: dev-back-door
+            battery_level: 87
+            battery_status: ok
+
+  - name: device info from a mains-powered device is dropped
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: '{"firmwareStatus": "Up to Date", "wirelessSignal": -52}'
+        metadata:
+          mqtt_topic: ring/loc-1/camera/dev-floodlight/info/state
+    output_batches: []
+
+  - name: entities with no kind are dropped
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: "7"
+        metadata:
+          mqtt_topic: ring/loc-1/chime/dev-chime/volume/state
+    output_batches: []
+
+  - name: unparseable device info goes to the battery DLQ untouched
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: "this is not json"
+        metadata:
+          mqtt_topic: ring/loc-1/alarm/dev-back-door/info/state
+    output_batches:
+      - - content_equals: "this is not json"
+          bloblang: '@kafka_topic == "home.ring.battery.dlq" && @device_id == "dev-back-door" && @bridge_error != ""'
+
+  - name: empty state payload goes to that topic's DLQ
+    target_processors: /pipeline/processors
+    environment:
+      MQTT_BRIDGE_PASSWORD: unused-in-tests
+    input_batch:
+      - content: ""
+        metadata:
+          mqtt_topic: ring/loc-1/camera/dev-front-door/motion/state
+    output_batches:
+      - - bloblang: '@kafka_topic == "home.ring.motion.dlq" && @bridge_error.contains("empty payload")'

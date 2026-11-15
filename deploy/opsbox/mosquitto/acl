@@ -1,0 +1,19 @@
+# Who may do what on the MQTT broker. Passwords are set in ../.env.
+#
+# Only ring-mqtt can write under ring/#. That is deliberate: ring-mqtt acts
+# on messages published to its command topics, so write access there is
+# the ability to arm, disarm and unlock.
+
+# ring-mqtt publishes device state and Home Assistant discovery messages,
+# and subscribes to its own command topics.
+user ring-mqtt
+topic readwrite ring/#
+topic readwrite homeassistant/#
+
+# The Redpanda Connect bridge only ever reads.
+user bridge
+topic read ring/#
+
+# Read-only account for looking around with an MQTT client.
+user viewer
+topic read #

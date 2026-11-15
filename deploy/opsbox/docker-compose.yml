@@ -1,4 +1,9 @@
-# Always-on Redpanda + Console for a homelab box, reachable from the LAN.
+# Always-on home event hub for a homelab box, reachable from the LAN:
+#
+#   Ring cloud -> ring-mqtt -> Mosquitto (MQTT) -> ring-bridge -> Redpanda
+#
+# Redpanda + Console are the Kafka side and are all the learning stages in
+# this repo need. The other three services feed real home events into it.
 #
 # This is a separate deployment from the repo-root docker-compose.yml, which
 # stays the laptop-only setup (everything on localhost). Differences here:
@@ -7,7 +12,7 @@
 #   - containers restart on their own after a crash or a reboot
 #   - memory is capped so the broker can't crowd out the rest of the box
 #
-#   cp .env.example .env          then set REDPANDA_ADVERTISED_HOST
+#   cp .env.example .env          then set the address and passwords
 #   docker compose up -d          start (or apply changes)
 #   docker compose ps             redpanda should show "healthy"
 #   docker compose down           stop, keep the data
@@ -15,6 +20,13 @@
 # See README.md in this folder for how to connect from another machine.
 
 name: event-hub
+
+# Cap container logs so a chatty service can't fill the disk.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
 
 services:
   redpanda:
@@ -95,5 +107,100 @@ services:
       redpanda:
         condition: service_healthy
 
+  hub-topics:
+    # One-shot: creates the home.ring.* topics, then exits. See
+    # create-topics.sh for the list and the reasoning behind it.
+    image: docker.redpanda.com/redpandadata/redpanda:v25.3.16
+    container_name: hub-topics
+    restart: "no"
+    entrypoint: ["/bin/bash", "/create-topics.sh"]
+    volumes:
+      - ./create-topics.sh:/create-topics.sh:ro
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  mosquitto:
+    # MQTT broker. Home devices and adapters publish here; see
+    # mosquitto/mosquitto.conf and mosquitto/acl.
+    image: eclipse-mosquitto:2.0.22
+    container_name: mosquitto
+    restart: unless-stopped
+    # start.sh builds the password file from the variables below, then
+    # starts the broker.
+    command: ["/bin/sh", "/hub/start.sh"]
+    environment:
+      MQTT_RING_PASSWORD: ${MQTT_RING_PASSWORD:?set MQTT_RING_PASSWORD in .env}
+      MQTT_BRIDGE_PASSWORD: ${MQTT_BRIDGE_PASSWORD:?set MQTT_BRIDGE_PASSWORD in .env}
+      MQTT_VIEWER_PASSWORD: ${MQTT_VIEWER_PASSWORD:?set MQTT_VIEWER_PASSWORD in .env}
+    mem_limit: 128m
+    ports:
+      - "0.0.0.0:1883:1883" # MQTT, password required
+    volumes:
+      - ./mosquitto:/hub:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      # Succeeds once something is listening on the MQTT port.
+      test: ["CMD-SHELL", "nc -w 2 127.0.0.1 1883 </dev/null"]
+      # Check quickly while starting, then once a minute: every check shows
+      # up in Mosquitto's log as a client connecting and leaving.
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+    logging: *logging
+
+  ring-mqtt:
+    # https://github.com/tsightler/ring-mqtt
+    # Holds a connection to Ring's cloud and republishes device events
+    # (motion, dings, door sensors, alarm state, battery) as MQTT messages
+    # under ring/#.
+    #
+    # First run: it has no Ring login yet, so it serves a sign-in page on
+    # port 55123 and waits. After you sign in there it saves a token to its
+    # data volume, connects, and closes that page again.
+    image: tsightler/ring-mqtt:5.9.3
+    container_name: ring-mqtt
+    restart: unless-stopped
+    environment:
+      MQTT_RING_PASSWORD: ${MQTT_RING_PASSWORD:?set MQTT_RING_PASSWORD in .env}
+    mem_limit: 512m
+    ports:
+      - "0.0.0.0:55123:55123" # Ring sign-in page (only up until signed in)
+    volumes:
+      # The Ring token lives in this volume. It grants full access to the
+      # Ring account, so it stays out of the repo folder.
+      - ring-mqtt-data:/data
+      # Writes /data/config.json from the environment before startup.
+      - ./ring-mqtt/05-write-config.sh:/etc/cont-init.d/05-write-config.sh:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    logging: *logging
+
+  ring-bridge:
+    # Redpanda Connect: subscribes to ring/# on Mosquitto and produces to
+    # the home.ring.* topics. The whole pipeline is connect/ring-bridge.yaml.
+    image: docker.redpanda.com/redpandadata/connect:4.118.0
+    container_name: ring-bridge
+    restart: unless-stopped
+    command: ["run", "--disable-telemetry", "/connect/ring-bridge.yaml"]
+    environment:
+      MQTT_BRIDGE_PASSWORD: ${MQTT_BRIDGE_PASSWORD:?set MQTT_BRIDGE_PASSWORD in .env}
+    mem_limit: 256m
+    volumes:
+      - ./connect:/connect:ro
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+      hub-topics:
+        condition: service_completed_successfully
+    logging: *logging
+
 volumes:
   redpanda-data:
+  mosquitto-data:
+  ring-mqtt-data:
