@@ -14,15 +14,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo test --release --locked --workspace \
     && cargo build --release --locked --workspace \
-    && cp target/release/best_share_watch target/release/block_watch target/release/mining_alerts /usr/local/bin/
+    && cd target/release \
+    && cp best_share_watch block_watch best_share_alerts block_alerts /usr/local/bin/
 
 # ---- Run: just the programs, plus ssh for reading the Pi ----
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /usr/local/bin/best_share_watch /usr/local/bin/block_watch /usr/local/bin/mining_alerts /usr/local/bin/
+COPY --from=build /usr/local/bin/*_watch /usr/local/bin/*_alerts /usr/local/bin/
 
 # Don't run as root (the two publishers override this, see the compose file).
 USER nobody
-CMD ["mining_alerts"]
+CMD ["block_alerts"]

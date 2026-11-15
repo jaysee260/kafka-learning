@@ -467,9 +467,9 @@ rest.
 ## Mining alerts: the Pi to Redpanda to your phone
 
 ```
-ckpool's scoreboard --(SSH, every ten minutes)--> best-share-watch --> home.mining.best-share --.
-                                                                                                 |--> mining-alerts --> ntfy --> phone
-Bitcoin Core --(announces every new block)------> block-watch ------> home.mining.block-found --'
+ckpool's scoreboard --(SSH, every ten minutes)--> best-share-watch --> home.mining.best-share ---> best-share-alerts --.
+                                                                                                                        |--> ntfy --> phone
+Bitcoin Core --(announces every new block)------> block-watch ------> home.mining.block-found --> block-alerts -------'
 ```
 
 Two things are news. Each has its own publisher, because they come from
@@ -485,13 +485,16 @@ the other with it:
   in, and for each block checks whether the reward pays `POOL_ADDRESS`. If
   it does, that block is yours.
 
-`mining-alerts` reads the two topics and buzzes your phone. All of it is
-Rust, in `services/rust/home/publishers` and `services/rust/home/consumers`.
+Each topic has its own consumer too: `best-share-alerts` and
+`block-alerts` read one topic each and buzz your phone. That makes four
+small services, and any one of them can be restarted or changed without
+touching the others. All of it is Rust, in
+`services/rust/home/publishers` and `services/rust/home/consumers`.
 
-| Topic | Key | Written by | One record means |
-| --- | --- | --- | --- |
-| `home.mining.best-share` | miner name, or `pool` | `best-share-watch` | this miner set a new personal best (`pool` is the best of everyone) |
-| `home.mining.block-found` | block height | `block-watch` | the pool found this block |
+| Topic | Key | Written by | Read by | One record means |
+| --- | --- | --- | --- | --- |
+| `home.mining.best-share` | miner name, or `pool` | `best-share-watch` | `best-share-alerts` | this miner set a new personal best (`pool` is the best of everyone) |
+| `home.mining.block-found` | block height | `block-watch` | `block-alerts` | the pool found this block |
 
 Both topics are compacted, so the latest record per key is kept forever.
 That makes each topic its publisher's memory: when it starts it reads the
@@ -513,7 +516,7 @@ Good to know:
 - The first reading for each miner is published with `initial: true` and
   does not alert, the same convention as the Ring topics.
 - Best shares under 1M do not alert, so a miner that just joined does not
-  buzz every few minutes. Change `WORTH_A_BUZZ` in the consumer's `main.rs`.
+  buzz every few minutes. Change `WORTH_A_BUZZ` in `best_share_alerts`.
 - A block alert is sent at ntfy's highest priority. Mining alerts are held
   for up to a day if ntfy is down, where door alerts are dropped after
   three minutes.
@@ -521,9 +524,10 @@ Good to know:
 ```bash
 docker logs -f block-watch        # every block it hears, and what it published
 docker logs -f best-share-watch   # new records it published
-docker logs -f mining-alerts      # what was sent to the phone
+docker logs -f best-share-alerts  # what was sent to the phone
+docker logs -f block-alerts
 docker exec redpanda rpk topic consume home.mining.best-share --offset start -n 20
-docker compose up -d --build best-share-watch block-watch   # after a code change (runs the tests too)
+docker compose up -d --build best-share-watch block-watch best-share-alerts block-alerts   # after a code change (runs the tests too)
 ```
 
 ## Things to know
