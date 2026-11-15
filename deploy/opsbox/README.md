@@ -398,9 +398,12 @@ topic still needs a login, and there is no sign-up.
 
 ### The alert consumer
 
-`ring-alerts` is the first consumer of the `home.ring.*` topics, and the
-whole of it is one file: `services/python/home/ring_alerts.py`. It sends
-an alert when
+`ring-alerts` is the first consumer of the `home.ring.*` topics. Its
+story fits in one 50-line file, `services/python/home/ring_alerts.py`:
+for each new event, work out what happened, look up the device's name,
+send it to the phone. The plumbing sits beside it in `kafka_io.py`
+(reading from Redpanda) and `ntfy.py` (reaching the phone). It sends an
+alert when
 
 - a contact sensor (door or window) opens or closes: "Back Door: Opened"
 - a camera sees motion: "Backyard: Motion detected"
@@ -408,7 +411,8 @@ an alert when
 and stays quiet about everything else: baseline records (`initial: true`),
 motion ending, and the alarm's own motion detector.
 
-It is worth reading for three things the earlier stages didn't need:
+The two helpers are worth reading for three things the earlier stages
+didn't need:
 
 - **Starting at the end.** The shop consumers use
   `auto.offset.reset=earliest` so a new group reads the whole topic. This
@@ -431,7 +435,8 @@ docker exec redpanda rpk group describe ring-alerts   # its offsets and lag
 docker compose up -d --build ring-alerts         # after changing the code
 ```
 
-To change what you get alerted about, edit `alert_for()` in that file. Its
+To change what you get alerted about, edit `what_happened()` in
+`ring_alerts.py`. Its
 tests need no broker: `python -m unittest home.test_ring_alerts` from
 `services/python`.
 

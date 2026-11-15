@@ -274,10 +274,10 @@ services:
   ring-alerts:
     # The first consumer of the home.ring.* topics: sends a phone alert
     # through ntfy when a door or window opens or closes, or a camera sees
-    # motion. The code, with the reasoning, is
-    # services/python/home/ring_alerts.py.
+    # motion. The code is services/python/home/ring_alerts.py and the two
+    # helpers next to it.
     #
-    # After changing that file:  docker compose up -d --build ring-alerts
+    # After changing the code:  docker compose up -d --build ring-alerts
     build: ../../services/python
     image: event-hub/python-services
     container_name: ring-alerts
