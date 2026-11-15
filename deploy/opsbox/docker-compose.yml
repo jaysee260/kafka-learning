@@ -224,6 +224,18 @@ services:
       # The web page asks for a login instead of showing an empty app.
       NTFY_ENABLE_LOGIN: "true"
       NTFY_REQUIRE_LOGIN: "true"
+      # The address people and phones use to reach this server. Leave it
+      # empty in .env if you only ever use the port below directly.
+      NTFY_BASE_URL: ${NTFY_BASE_URL:-}
+      # ntfy limits requests and failed logins per client address. Behind a
+      # reverse proxy every request arrives from the proxy, so read the
+      # real client from X-Forwarded-For, skipping addresses on Docker's
+      # own networks (the proxy's side of the tunnel). A client that talks
+      # to port 2586 directly can fake this header, which only matters if
+      # you don't trust your LAN.
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_PROXY_TRUSTED_HOSTS: 172.16.0.0/12
+      NTFY_LOG_LEVEL: ${NTFY_LOG_LEVEL:-info}
     mem_limit: 128m
     ports:
       - "0.0.0.0:2586:80" # HTTP, login required

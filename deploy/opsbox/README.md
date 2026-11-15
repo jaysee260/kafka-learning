@@ -312,6 +312,8 @@ alert, and posts a line of text to ntfy. Nothing publishes to ntfy yet
 except the test script below.
 
 - Address: `http://192.168.1.246:2586` on the LAN (web page and API).
+  This deployment is also published at `https://ntfy.humblehome.net`; see
+  [Reaching it from outside](#reaching-it-from-outside).
 - Topic: `home-alerts`. ntfy topics are created by using them; the
   accounts below are allowed any topic starting with `home-`.
 - Messages are kept for 72 hours, so a phone that was out of reach
@@ -342,25 +344,57 @@ To change a password, edit `.env` and run `docker compose up -d`.
 4. On Android, allow the app to ignore battery optimization when it asks.
    Otherwise Android may put it to sleep and alerts arrive late.
 
-**Which address.** The phone only gets alerts while it can reach this
-server, because nothing here is exposed to the internet:
+**Which address.** The phone only gets alerts while it can reach the
+server:
 
 - `http://192.168.1.246:2586` works on your home Wi-Fi only. Alerts sent
   while you are out arrive when you get home.
-- The server's [Tailscale](https://tailscale.com) address (for example
-  `http://100.89.111.110:2586`) works anywhere, at home too, as long as
-  Tailscale is connected on the phone. Use this one if you want to know
-  about the door while you are away.
+- A public HTTPS address (here `https://ntfy.humblehome.net`) works
+  anywhere, with nothing extra on the phone. Use this one if you have it.
+- Without a public address, the server's [Tailscale](https://tailscale.com)
+  address works anywhere as long as Tailscale is connected on the phone.
 
 **Android and iOS differ.** The Android app keeps its own connection open
 to the server, so alerts are instant with no outside service involved. iOS
 does not allow that: an iPhone only wakes the app when Apple's push
 service says so, which a self-hosted server can't do by itself. The fix
-is `NTFY_UPSTREAM_BASE_URL: https://ntfy.sh` together with `NTFY_BASE_URL`
-on the `ntfy` service. The server then sends ntfy.sh a "wake up" signal
+is `NTFY_UPSTREAM_BASE_URL: https://ntfy.sh` on the `ntfy` service, together
+with a public `NTFY_BASE_URL`. The server then sends ntfy.sh a "wake up" signal
 (a message id, not the message text) and the iPhone fetches the text from
 this server. That is switched off here; turn it on if an iPhone needs
 alerts.
+
+### Reaching it from outside
+
+ntfy speaks plain HTTP on port 2586. To use it away from home it needs
+HTTPS and a public name, and this folder doesn't provide either. Put it
+behind whatever reverse proxy you already run and set `NTFY_BASE_URL` in
+`.env` to the resulting address.
+
+Here that is `https://ntfy.humblehome.net`, with no router ports opened:
+
+```
+phone -> Cloudflare (TLS) -> Cloudflare Tunnel -> Nginx Proxy Manager -> opsbox:2586
+```
+
+Three things make it work:
+
+- **A proxy host** in Nginx Proxy Manager for the name, forwarding to
+  `http://192.168.1.246:2586` with websockets on, and in its Advanced
+  settings `proxy_buffering off; proxy_request_buffering off;
+  proxy_read_timeout 3m; proxy_send_timeout 3m;`. The phone app holds one
+  long connection open and messages trickle down it. With buffering on,
+  nginx would sit on them.
+- **A tunnel route and a DNS record** at Cloudflare: the name is a proxied
+  CNAME to the tunnel, and the tunnel forwards it to the proxy.
+- **`NTFY_BEHIND_PROXY`** in `docker-compose.yml`. ntfy limits requests and
+  failed logins per client address, and behind a proxy every request
+  seems to come from the proxy. This makes ntfy read the real client from
+  the `X-Forwarded-For` header instead, so one stranger guessing passwords
+  locks out only themselves.
+
+Being public changes who can knock on the door, not who gets in: every
+topic still needs a login, and there is no sign-up.
 
 ### Send a notification
 
@@ -402,11 +436,14 @@ rest.
   `event-hub_ring-mqtt-data` volume and gives full access to the Ring
   account without a password or 2FA. Treat backups of that volume
   accordingly.
-- **ntfy logins travel over plain HTTP.** Anyone who can capture traffic
-  on your LAN could read the `phone` password and your alerts. Over
-  Tailscale the connection is encrypted. The proper fix is HTTPS, for
-  example `tailscale serve` in front of port 2586; do that before
-  exposing ntfy beyond your own network.
+- **ntfy's own port is plain HTTP.** Anyone who can capture traffic on
+  your LAN could read a password sent to port 2586. Use the HTTPS address
+  on phones and browsers and keep port 2586 for things running on the
+  server itself.
+- **ntfy's login page is on the internet.** It is protected by the two
+  passwords in `.env` and by ntfy's limit on failed logins, so keep those
+  passwords long. Cloudflare terminates TLS, which means it can read the
+  alert text passing through.
 - **Dev-container mode.** The broker skips fsync, so an unclean power loss
   can lose the last few seconds of writes. Before anything you care about
   depends on this broker, drop `--mode dev-container` and read the
