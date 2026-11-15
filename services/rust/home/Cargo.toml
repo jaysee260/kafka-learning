@@ -1,8 +1,8 @@
 # The home event hub's Rust services, one small package per service:
 #
-#   publishers/   put events INTO Redpanda    (mining_watch)
+#   publishers/   put events INTO Redpanda    (best_share_watch, block_watch)
 #   consumers/    read events OUT of Redpanda (mining_alerts)
-#   shared/       what both sides need: the event types and the Redpanda plumbing
+#   shared/       what they have in common: event types, Redpanda, reaching the Pi
 #
 # A workspace builds them together, so they share one Cargo.lock and one
 # compiled copy of every dependency.
