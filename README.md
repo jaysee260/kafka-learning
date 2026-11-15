@@ -14,8 +14,9 @@ offsets) applies to Apache Kafka unchanged.
                           └──▶ analytics       running revenue totals
 ```
 
-Stages 1 and 2 are built and working. Stages 3 to 7 are exercises in
-[EXERCISES.md](EXERCISES.md) that you build on top of this code.
+Stages 1 and 2 are built and working, in Python and in Rust. Stages 3 to 7
+are exercises in [EXERCISES.md](EXERCISES.md) that you build on top of this
+code.
 
 | Stage | What you learn | Status |
 | --- | --- | --- |
@@ -25,7 +26,7 @@ Stages 1 and 2 are built and working. Stages 3 to 7 are exercises in
 | 4. Failure and replay | at-least-once, offset resets, dead-letter topics | exercise |
 | 5. Stream processing | joins, windowed aggregation | exercise |
 | 6. Kafka Connect + dashboard (stretch) | integrating with databases | exercise |
-| 7. Rewrite inventory in Rust | `rdkafka` + Tokio, polyglot services | exercise |
+| 7. Services in Rust | `rdkafka` + Tokio, polyglot services | built (DLQ part is an exercise) |
 
 ## The core ideas in five minutes
 
@@ -81,6 +82,11 @@ consumer groups with their lag. It's the best way to see what's happening.
 All Python commands below are run from `services/python` with the virtualenv
 active. The broker address defaults to `localhost:19092`; override it with
 `BOOTSTRAP_SERVERS` if needed.
+
+To run the broker on an always-on machine instead and use it from other
+machines on your network, see [`deploy/opsbox`](deploy/opsbox/README.md).
+It also explains listeners and advertised addresses, which is what you have
+to get right as soon as the broker isn't on `localhost`.
 
 You can also poke at the broker from the command line with `rpk`, Redpanda's
 CLI, which is inside the container:
@@ -159,11 +165,28 @@ commits offsets and tells the group the member is leaving. If a consumer is
 killed instead, the group waits for its session timeout (45 seconds by
 default) before it hands that member's partitions to anyone else.
 
+## The same services in Rust
+
+Every service above also exists in Rust, in
+[`services/rust/shop`](services/rust/shop). They share the broker, topics and
+JSON format with the Python ones, so you can run any mix of the two:
+
+```bash
+cd services/rust/shop
+cargo run --bin producer        # or order_logger, inventory, notifications, analytics, ...
+```
+
+See [services/rust/README.md](services/rust/README.md) for setup, a Python
+to Rust file map, and how to run a Python and a Rust instance in the same
+consumer group.
+
 ## Repo layout
 
 ```
 docker-compose.yml        Redpanda broker + Redpanda Console
 EXERCISES.md              stages 3 to 7
+deploy/
+  opsbox/                 always-on, LAN-reachable variant of the broker
 services/
   python/
     requirements.txt
@@ -179,7 +202,11 @@ services/
         inventory.py      stage 2
         notifications.py  stage 2
         analytics.py      stage 2
-  rust/                   Rust services (stage 7)
+  rust/
+    README.md             setup and walkthrough for the Rust versions
+    shop/                 one Cargo package, mirrors services/python/shop
+      src/lib.rs          shared library: config.rs, events.rs, consumer.rs
+      src/bin/            one program per service (producer, inventory, ...)
 ```
 
 Services in different languages share one broker and one set of topics, so

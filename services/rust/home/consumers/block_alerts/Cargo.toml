@@ -1,0 +1,10 @@
+[package]
+name = "block_alerts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+shared.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
