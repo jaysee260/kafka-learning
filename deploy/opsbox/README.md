@@ -8,14 +8,16 @@ against either one; you choose with `BOOTSTRAP_SERVERS`.
 
 It also carries the first real event source: Ring devices, by way of MQTT.
 That part is described in [Home events](#home-events-ring-to-mqtt-to-redpanda)
-below, and the learning stages don't depend on it.
+below, and the learning stages don't depend on it. The last piece is
+[ntfy](#phone-alerts-ntfy), which turns an HTTP request into a push
+notification on your phone.
 
 ## Start it (on the server)
 
 ```bash
 cd deploy/opsbox
 cp .env.example .env         # set REDPANDA_ADVERTISED_HOST to the server's LAN IP,
-                             # and make up the three MQTT passwords
+                             # and make up the MQTT and ntfy passwords
 docker compose up -d
 docker compose ps            # wait until redpanda shows "healthy"
 ```
@@ -296,6 +298,172 @@ To add a topic, add it to `create-topics.sh` and run
 - **A ring-mqtt outage does lose events.** If ring-mqtt or the internet
   connection is down, Ring's cloud does not replay what you missed.
 
+## Phone alerts: ntfy
+
+[ntfy](https://ntfy.sh) is a small server that turns an HTTP POST into a
+push notification. It is the last hop of this pipeline:
+
+```
+home.ring.contact / home.ring.motion  ->  ring-alerts  ->  ntfy  ->  your phone
+```
+
+`ring-alerts` is a consumer: it reads events from Redpanda, decides which
+ones deserve an alert, and posts a line of text to ntfy. It is described
+under [The alert consumer](#the-alert-consumer) below.
+
+- Address: `http://192.168.1.246:2586` on the LAN (web page and API).
+  This deployment is also published at `https://ntfy.humblehome.net`; see
+  [Reaching it from outside](#reaching-it-from-outside).
+- Topic: `home-alerts`. ntfy topics are created by using them; the
+  accounts below are allowed any topic starting with `home-`.
+- Messages are kept for 72 hours, so a phone that was out of reach
+  catches up when it reconnects.
+
+### Accounts
+
+Everything is denied unless an account is granted it. There are two
+accounts, created from `.env` by `ntfy/create-users.sh` every time you run
+`docker compose up -d`:
+
+| Account | Password in `.env` | May do |
+|---|---|---|
+| `hub-publisher` | `NTFY_PUBLISHER_PASSWORD` | publish to `home-*`, cannot read |
+| `phone` | `NTFY_PHONE_PASSWORD` | read `home-*`, cannot publish |
+
+To change a password, edit `.env` and run `docker compose up -d`.
+
+### Subscribe on your phone
+
+1. Install the ntfy app ([Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy),
+   [F-Droid](https://f-droid.org/en/packages/io.heckel.ntfy/),
+   [iOS](https://apps.apple.com/us/app/ntfy/id1625396347)).
+2. Tap **+**, enter the topic `home-alerts`, turn on **Use another
+   server** and enter the server address (see below for which one).
+3. The app asks for a login: user `phone`, password is
+   `NTFY_PHONE_PASSWORD` from `.env`.
+4. On Android, allow the app to ignore battery optimization when it asks.
+   Otherwise Android may put it to sleep and alerts arrive late.
+
+**Which address.** The phone only gets alerts while it can reach the
+server:
+
+- `http://192.168.1.246:2586` works on your home Wi-Fi only. Alerts sent
+  while you are out arrive when you get home.
+- A public HTTPS address (here `https://ntfy.humblehome.net`) works
+  anywhere, with nothing extra on the phone. Use this one if you have it.
+- Without a public address, the server's [Tailscale](https://tailscale.com)
+  address works anywhere as long as Tailscale is connected on the phone.
+
+**Android and iOS differ.** The Android app keeps its own connection open
+to the server, so alerts are instant with no outside service involved. iOS
+does not allow that: an iPhone only wakes the app when Apple's push
+service says so, which a self-hosted server can't do by itself. The fix
+is `NTFY_UPSTREAM_BASE_URL: https://ntfy.sh` on the `ntfy` service, together
+with a public `NTFY_BASE_URL`. The server then sends ntfy.sh a "wake up" signal
+(a message id, not the message text) and the iPhone fetches the text from
+this server. That is switched off here; turn it on if an iPhone needs
+alerts.
+
+### Reaching it from outside
+
+ntfy speaks plain HTTP on port 2586. To use it away from home it needs
+HTTPS and a public name, and this folder doesn't provide either. Put it
+behind whatever reverse proxy you already run and set `NTFY_BASE_URL` in
+`.env` to the resulting address.
+
+Here that is `https://ntfy.humblehome.net`, with no router ports opened:
+
+```
+phone -> Cloudflare (TLS) -> Cloudflare Tunnel -> Nginx Proxy Manager -> opsbox:2586
+```
+
+Three things make it work:
+
+- **A proxy host** in Nginx Proxy Manager for the name, forwarding to
+  `http://192.168.1.246:2586` with websockets on, and in its Advanced
+  settings `proxy_buffering off; proxy_request_buffering off;
+  proxy_read_timeout 3m; proxy_send_timeout 3m;`. The phone app holds one
+  long connection open and messages trickle down it. With buffering on,
+  nginx would sit on them.
+- **A tunnel route and a DNS record** at Cloudflare: the name is a proxied
+  CNAME to the tunnel, and the tunnel forwards it to the proxy.
+- **`NTFY_BEHIND_PROXY`** in `docker-compose.yml`. ntfy limits requests and
+  failed logins per client address, and behind a proxy every request
+  seems to come from the proxy. This makes ntfy read the real client from
+  the `X-Forwarded-For` header instead, so one stranger guessing passwords
+  locks out only themselves.
+
+Being public changes who can knock on the door, not who gets in: every
+topic still needs a login, and there is no sign-up.
+
+### The alert consumer
+
+`ring-alerts` is the first consumer of the `home.ring.*` topics. Its
+story fits in one 50-line file, `services/python/home/ring_alerts.py`:
+for each new event, work out what happened, look up the device's name,
+send it to the phone. The plumbing sits beside it in `kafka_io.py`
+(reading from Redpanda) and `ntfy.py` (reaching the phone). It sends an
+alert when
+
+- a contact sensor (door or window) opens or closes: "Back Door: Opened"
+- a camera sees motion: "Backyard: Motion detected"
+
+and stays quiet about everything else: baseline records (`initial: true`),
+motion ending, and the alarm's own motion detector.
+
+The two helpers are worth reading for three things the earlier stages
+didn't need:
+
+- **Starting at the end.** The shop consumers use
+  `auto.offset.reset=earliest` so a new group reads the whole topic. This
+  one uses `latest`: the first time it runs it starts with whatever happens
+  next, because yesterday's door openings are not news. After that first
+  run the group's committed offsets decide where it resumes.
+- **A lookup table from a compacted topic.** Events carry a device id, and
+  the names live in `home.ring.devices`. The service reads that topic from
+  the beginning into a dictionary when it starts and keeps it current
+  while it runs. That is a stream-table join done by hand.
+- **Giving up on purpose.** If ntfy is down, the service retries, but only
+  for three minutes (`MAX_AGE_SECONDS`). After that the alert is dropped
+  with a line in the log. The same rule applies after the service itself
+  was down: it resumes where it left off and skips anything too old. A
+  stale "door opened" an hour late is worse than none.
+
+```bash
+docker logs -f ring-alerts                       # one line per alert sent or dropped
+docker exec redpanda rpk group describe ring-alerts   # its offsets and lag
+docker compose up -d --build ring-alerts         # after changing the code
+```
+
+To change what you get alerted about, edit `what_happened()` in
+`ring_alerts.py`. Its
+tests need no broker: `python -m unittest home.test_ring_alerts` from
+`services/python`.
+
+### Send a notification
+
+```bash
+./ntfy/send-test.sh                        # a test message
+./ntfy/send-test.sh "Front door opened"    # your own text
+```
+
+From code it is one HTTP request with basic auth:
+
+```python
+import requests
+
+requests.post(
+    "http://192.168.1.246:2586/home-alerts",
+    data="Front door opened",
+    headers={"Title": "Door", "Priority": "high", "Tags": "door"},
+    auth=("hub-publisher", NTFY_PUBLISHER_PASSWORD),
+)
+```
+
+`Title`, `Priority` (`min` to `max`) and `Tags` (emoji short names) are
+optional; the [publishing docs](https://docs.ntfy.sh/publish/) list the
+rest.
+
 ## Things to know
 
 - **No authentication on Redpanda or Console.** Anyone on your LAN can
@@ -312,14 +480,23 @@ To add a topic, add it to `create-topics.sh` and run
   `event-hub_ring-mqtt-data` volume and gives full access to the Ring
   account without a password or 2FA. Treat backups of that volume
   accordingly.
+- **ntfy's own port is plain HTTP.** Anyone who can capture traffic on
+  your LAN could read a password sent to port 2586. Use the HTTPS address
+  on phones and browsers and keep port 2586 for things running on the
+  server itself.
+- **ntfy's login page is on the internet.** It is protected by the two
+  passwords in `.env` and by ntfy's limit on failed logins, so keep those
+  passwords long. Cloudflare terminates TLS, which means it can read the
+  alert text passing through.
 - **Dev-container mode.** The broker skips fsync, so an unclean power loss
   can lose the last few seconds of writes. Before anything you care about
   depends on this broker, drop `--mode dev-container` and read the
   [production settings](https://docs.redpanda.com/current/deploy/redpanda/manual/production/).
 - **Memory.** The broker is told to use 1 GB (`--memory 1G`) with a 1.5 GB
   container limit; Console and ring-mqtt are limited to 512 MB each, the
-  bridge to 256 MB and Mosquitto to 128 MB. In practice the three new
-  services use about 120 MB between them.
+  bridge to 256 MB, and Mosquitto, ntfy and ring-alerts to 128 MB each. In
+  practice the Ring services use about 120 MB between them, and ntfy and
+  ring-alerts about 20 MB each.
 - **Disk.** Topics keep data for 7 days by default with no size cap. That
   is tiny for this project's traffic. Set `retention.bytes` on a topic
   before pointing anything high-volume at it.
@@ -332,7 +509,9 @@ To add a topic, add it to `create-topics.sh` and run
 ```bash
 docker compose down        # stop; topics, offsets and the Ring sign-in are kept
 docker compose down -v     # stop and DELETE all topics and offsets, AND the Ring
-                           # sign-in (you would have to sign in again)
+                           # sign-in (you would have to sign in again), AND
+                           # ntfy's stored messages (its accounts come back
+                           # from .env on the next start)
 
 docker compose stop ring-mqtt mosquitto ring-bridge   # pause just the Ring side
 ```
