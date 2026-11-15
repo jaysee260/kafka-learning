@@ -49,7 +49,8 @@ pub struct PayoutAddress(ScriptBuf);
 
 impl PayoutAddress {
     pub fn parse(address: &str) -> Result<PayoutAddress> {
-        let address = Address::from_str(address.trim()).with_context(|| format!("'{address}' is not a Bitcoin address"))?;
+        let address =
+            Address::from_str(address.trim()).with_context(|| format!("'{address}' is not a Bitcoin address"))?;
         Ok(PayoutAddress(address.require_network(Network::Bitcoin)?.script_pubkey()))
     }
 }

@@ -114,7 +114,8 @@ pub fn pi() -> String {
 /// How every ssh call here is made: no questions asked, one key, and only
 /// to the Pi we already know, never to a stranger.
 pub fn ssh_options() -> Vec<String> {
-    let mut options = vec!["-o".to_string(), "BatchMode=yes".to_string(), "-o".to_string(), "ConnectTimeout=10".to_string()];
+    let mut options =
+        vec!["-o".to_string(), "BatchMode=yes".to_string(), "-o".to_string(), "ConnectTimeout=10".to_string()];
     let key = setting("CKPOOL_SSH_KEY", "");
     if !key.is_empty() {
         options.extend(["-i".to_string(), key, "-o".to_string(), "IdentitiesOnly=yes".to_string()]);

@@ -91,7 +91,11 @@ impl Events {
             let happened_at = record.timestamp().to_millis().map_or_else(now, |ms| ms as f64 / 1000.0);
             match serde_json::from_slice(record.payload().unwrap_or_default()) {
                 Ok(event) => return Some((event, happened_at)),
-                Err(_) => println!("skipping a record that is not a mining event ({} offset {})", record.topic(), record.offset()),
+                Err(_) => println!(
+                    "skipping a record that is not a mining event ({} offset {})",
+                    record.topic(),
+                    record.offset()
+                ),
             }
         }
     }

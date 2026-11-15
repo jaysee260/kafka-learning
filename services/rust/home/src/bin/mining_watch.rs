@@ -120,7 +120,10 @@ mod tests {
     #[test]
     fn beating_the_record_is_news() {
         let event = new_best_share("humble_duo1", 500000000, Some(&reported(486149527))).unwrap();
-        assert!(matches!(event, Event::BestShare { initial: false, difficulty: 500000000, previous: Some(486149527), .. }));
+        assert!(matches!(
+            event,
+            Event::BestShare { initial: false, difficulty: 500000000, previous: Some(486149527), .. }
+        ));
     }
 
     #[test]

@@ -91,9 +91,16 @@ mod tests {
 
     #[test]
     fn a_found_block_is_urgent_and_names_the_miner_when_known() {
-        let event = Event::BlockFound { source: "ckpool".to_string(), height: 950123, miner: Some("humble_nano3s".to_string()) };
+        let event = Event::BlockFound {
+            source: "ckpool".to_string(),
+            height: 950123,
+            miner: Some("humble_nano3s".to_string()),
+        };
         let alert = what_happened(&event).unwrap();
-        assert_eq!((alert.title.as_str(), alert.message.as_str()), ("BLOCK FOUND", "humble_nano3s solved block 950123"));
+        assert_eq!(
+            (alert.title.as_str(), alert.message.as_str()),
+            ("BLOCK FOUND", "humble_nano3s solved block 950123")
+        );
         assert!(alert.urgent);
 
         let event = Event::BlockFound { source: "bitcoin-core".to_string(), height: 950123, miner: None };
